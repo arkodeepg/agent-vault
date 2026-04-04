@@ -19,6 +19,8 @@ You unlock once:
 ```bash
 s add OPENAI_API_KEY=sk-proj-abc123...xyz
 s add STRIPE_SECRET=sk_live_...
+# or pull from an existing shell env (e.g. the one you just `env`-loaded):
+s import GITHUB_TOKEN
 s unlock                  # enter passphrase; 7-day session begins
 ```
 
@@ -58,7 +60,8 @@ Env overrides: `S_PASSPHRASE` (non-interactive passphrase), `S_TICKET_DIR`
 (override ticket location, e.g. for per-project caches or tests).
 
 ```
-s add KEY=VALUE       append to ./.senv
+s add [-f] KEY=VALUE  add to ./.senv (-f overwrites, else prompts if exists)
+s import [-f] NAME    copy $NAME from the current env into the store
 s list                list key names
 s unlock              start/refresh a 7-day session (prompts passphrase)
 s lock                end session (deletes the ticket)

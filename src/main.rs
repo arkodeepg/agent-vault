@@ -52,17 +52,12 @@ fn run() -> Result<()> {
     }
     match args[0].as_str() {
         "add" => {
-            let mut force = false;
-            let mut pair: Option<String> = None;
-            for a in args.iter().skip(1) {
-                match a.as_str() {
-                    "-f" | "--force" => force = true,
-                    other if pair.is_none() => pair = Some(other.to_string()),
-                    _ => bail!("usage: s add [-f] KEY=VALUE"),
-                }
-            }
-            let pair = pair.ok_or_else(|| anyhow!("usage: s add [-f] KEY=VALUE"))?;
-            cmd_add(&pair, force)
+            let (force, pos) = parse_force_and_positional(&args[1..], "s add [-f] KEY=VALUE")?;
+            cmd_add(&pos, force)
+        }
+        "import" => {
+            let (force, pos) = parse_force_and_positional(&args[1..], "s import [-f] NAME")?;
+            cmd_import(&pos, force)
         }
         "list" | "ls" => cmd_list(),
         "unlock" => cmd_unlock(),
@@ -81,6 +76,7 @@ fn print_usage() {
         "s — append-only encrypted env store with 7-day session\n\n\
          usage:\n  \
          s add [-f] KEY=VALUE  add a variable to ./{STORE_FILE}; -f overwrites\n  \
+         s import [-f] NAME    copy $NAME from the current env into the store\n  \
          s list                list variable names stored\n  \
          s unlock              start/refresh session (prompts passphrase)\n  \
          s lock                end session (delete ticket)\n  \
@@ -119,6 +115,29 @@ fn open_existing(path: &Path) -> Result<Unlocked> {
     let entries = store::decrypt_payload(&header, &dk)?;
     ticket::save_dk(path, &header.wrapped_dk, &dk, Duration::from_secs(TICKET_LIFETIME_SECS))?;
     Ok(Unlocked { header, dk, entries })
+}
+
+fn parse_force_and_positional(args: &[String], usage: &'static str) -> Result<(bool, String)> {
+    let mut force = false;
+    let mut pos: Option<String> = None;
+    for a in args {
+        match a.as_str() {
+            "-f" | "--force" => force = true,
+            other if pos.is_none() => pos = Some(other.to_string()),
+            _ => bail!("usage: {usage}"),
+        }
+    }
+    Ok((force, pos.ok_or_else(|| anyhow!("usage: {usage}"))?))
+}
+
+fn cmd_import(name: &str, force: bool) -> Result<()> {
+    if !store::valid_key(name) {
+        bail!("invalid variable name: {name:?}");
+    }
+    let v = std::env::var(name)
+        .with_context(|| format!("${name} is not set in the current environment"))?;
+    let pair = format!("{name}={v}");
+    cmd_add(&pair, force)
 }
 
 fn cmd_add(pair: &str, force: bool) -> Result<()> {
