@@ -1,31 +1,34 @@
-// s — append-only encrypted env store with a 7-day boot-time-bound session.
+// s — encrypted env store with per-entry encryption + multi-host recipients.
 //
-// Commands:
-//   s add KEY=VALUE       append to ./.senv (append-only; no overwrites)
-//   s list                list key names
-//   s unlock              start/refresh 7-day session (prompts passphrase)
-//   s lock                end session (delete ticket)
-//   s status              show session + store state
-//   s -- <cmd> [args...]  run cmd with vars in env, scrubbing echoes on stdout/stderr
+// `.senv` is a YAML file:
 //
-// Every command that needs to decrypt the store first tries the session
-// ticket. When the ticket is missing, expired, or invalidated by a reboot,
-// we prompt for the passphrase exactly once and write a fresh ticket.
+//   hosts:
+//     laptop:  "ssh-ed25519 AAAA... tobi@laptop"
+//     agent:   "ssh-ed25519 AAAA... agent@box"
+//   keys:
+//     API_KEY: "<base64 age-encrypted blob>"
+//     DB_URL:  "<base64 age-encrypted blob>"
 //
-// See store.rs and ticket.rs for the crypto.
+// * `s add` / `s import` only read `hosts` (public keys). No private key
+//   required for appending.
+// * `s list / s -- cmd` need an SSH identity that matches a listed host to
+//   decrypt. A 7-day session ticket caches the decrypted map so the
+//   identity is only needed once per week.
+// * `s hosts add/remove` need an SSH identity (to re-wrap every value for
+//   the new recipient set).
 
-mod prompt;
+mod identity;
 mod scrub;
 mod store;
 mod sysinfo;
 mod ticket;
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-
 
 const STORE_FILE: &str = ".senv";
 const TICKET_LIFETIME_SECS: u64 = 7 * 24 * 60 * 60;
@@ -51,18 +54,20 @@ fn run() -> Result<()> {
         return cmd_exec(args);
     }
     match args[0].as_str() {
+        "init" => cmd_init(&args[1..]),
         "add" => {
-            let (force, pos) = parse_force_and_positional(&args[1..], "s add [-f] KEY=VALUE")?;
+            let (force, pos) = parse_force(&args[1..], "s add [-f] KEY=VALUE")?;
             cmd_add(&pos, force)
         }
         "import" => {
-            let (force, pos) = parse_force_and_positional(&args[1..], "s import [-f] NAME")?;
+            let (force, pos) = parse_force(&args[1..], "s import [-f] NAME")?;
             cmd_import(&pos, force)
         }
         "list" | "ls" => cmd_list(),
         "unlock" => cmd_unlock(),
         "lock" => cmd_lock(),
         "status" => cmd_status(),
+        "hosts" => cmd_hosts(&args[1..]),
         "help" | "-h" | "--help" => {
             print_usage();
             Ok(())
@@ -73,18 +78,22 @@ fn run() -> Result<()> {
 
 fn print_usage() {
     eprintln!(
-        "s — append-only encrypted env store with 7-day session\n\n\
+        "s — encrypted env store with multi-host recipients\n\n\
          usage:\n  \
-         s add [-f] KEY=VALUE  add a variable to ./{STORE_FILE}; -f overwrites\n  \
-         s import [-f] NAME    copy $NAME from the current env into the store\n  \
-         s list                list variable names stored\n  \
-         s unlock              start/refresh session (prompts passphrase)\n  \
-         s lock                end session (delete ticket)\n  \
-         s status              show session state\n  \
-         s -- <cmd> [args...]  run cmd with stored vars in env, scrubbing echoes\n\n\
+         s init [NAME]               create ./{STORE_FILE}, add this host as NAME\n  \
+         s add [-f] KEY=VALUE        add a variable (no identity required)\n  \
+         s import [-f] NAME          copy $NAME from the current env into the store\n  \
+         s list                      list variable names\n  \
+         s unlock                    start/refresh 7-day session (uses SSH identity)\n  \
+         s lock                      end session (delete ticket)\n  \
+         s status                    show store, hosts, session state\n  \
+         s hosts                     list authorized hosts\n  \
+         s hosts add NAME <key|path> add a recipient, re-wrap all values\n  \
+         s hosts remove NAME         remove a recipient, re-wrap all values\n  \
+         s -- <cmd> [args...]        run cmd with stored vars in env, scrubbing echoes\n\n\
          env:\n  \
-         S_PASSPHRASE          non-interactive passphrase\n  \
-         S_TICKET_DIR          override where session tickets are stored\n"
+         S_IDENTITY                  path to SSH private key (else ~/.ssh/id_ed25519)\n  \
+         S_TICKET_DIR                override where session tickets are stored\n"
     );
 }
 
@@ -92,32 +101,7 @@ fn store_path() -> PathBuf {
     PathBuf::from(STORE_FILE)
 }
 
-struct Unlocked {
-    header: store::Header,
-    dk: [u8; 32],
-    entries: Vec<(String, String)>,
-}
-
-/// Open an existing store. Uses the ticket if valid, otherwise prompts and
-/// writes a fresh ticket.
-fn open_existing(path: &Path) -> Result<Unlocked> {
-    let raw = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    if !store::is_v1(&raw) {
-        bail!("{} is not in s v1 format (remove it and re-add your secrets)", path.display());
-    }
-    let header = store::parse_header(&raw)?;
-    if let Some(dk) = ticket::try_load_dk(path, &header.wrapped_dk)? {
-        let entries = store::decrypt_payload(&header, &dk)?;
-        return Ok(Unlocked { header, dk, entries });
-    }
-    let pp = prompt::existing("unlock")?;
-    let dk = store::unwrap_dk(&header.wrapped_dk, &pp)?;
-    let entries = store::decrypt_payload(&header, &dk)?;
-    ticket::save_dk(path, &header.wrapped_dk, &dk, Duration::from_secs(TICKET_LIFETIME_SECS))?;
-    Ok(Unlocked { header, dk, entries })
-}
-
-fn parse_force_and_positional(args: &[String], usage: &'static str) -> Result<(bool, String)> {
+fn parse_force(args: &[String], usage: &'static str) -> Result<(bool, String)> {
     let mut force = false;
     let mut pos: Option<String> = None;
     for a in args {
@@ -130,8 +114,83 @@ fn parse_force_and_positional(args: &[String], usage: &'static str) -> Result<(b
     Ok((force, pos.ok_or_else(|| anyhow!("usage: {usage}"))?))
 }
 
+// --- init -----------------------------------------------------------------
+
+fn cmd_init(args: &[String]) -> Result<()> {
+    let path = store_path();
+    if path.exists() {
+        bail!("{} already exists", path.display());
+    }
+    let host_name = if let Some(n) = args.first() {
+        n.clone()
+    } else {
+        hostname_default()
+    };
+    if !store::valid_host_name(&host_name) {
+        bail!("invalid host name: {host_name:?}");
+    }
+    let id_path = identity::discover()?;
+    let pubkey = identity::public_key_for(&id_path)?;
+    let pubkey = store::validate_pubkey_line(&pubkey)?;
+
+    let mut file = store::SenvFile::default();
+    file.hosts.insert(host_name.clone(), pubkey);
+    file.save(&path)?;
+    eprintln!(
+        "s: initialized {} with host {host_name} (identity: {})",
+        path.display(),
+        id_path.display()
+    );
+    Ok(())
+}
+
+fn hostname_default() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "this-host".to_string())
+}
+
+// --- add / import ---------------------------------------------------------
+
+fn cmd_add(pair: &str, force: bool) -> Result<()> {
+    let (k, v) = pair.split_once('=').ok_or_else(|| anyhow!("expected KEY=VALUE"))?;
+    if !store::valid_key_name(k) {
+        bail!("invalid key: {k:?}");
+    }
+    if v.contains('\n') {
+        bail!("value must not contain newlines");
+    }
+
+    let path = store_path();
+    if !path.exists() {
+        bail!("no {STORE_FILE} here — run `s init` first");
+    }
+    let mut file = store::SenvFile::load(&path)?;
+    if file.keys.contains_key(k) && !force && !confirm_overwrite(k)? {
+        bail!("aborted");
+    }
+
+    let recipients = file.recipients()?;
+    let blob = store::encrypt_value(v, recipients)?;
+    let verb = if file.keys.contains_key(k) { "updated" } else { "added" };
+    file.keys.insert(k.to_string(), blob);
+    file.save(&path)?;
+    eprintln!("s: {verb} {k}");
+
+    // Invalidate cached ticket — it may have a stale value for this key.
+    let _ = ticket::delete(&path);
+    Ok(())
+}
+
 fn cmd_import(name: &str, force: bool) -> Result<()> {
-    if !store::valid_key(name) {
+    if !store::valid_key_name(name) {
         bail!("invalid variable name: {name:?}");
     }
     let v = std::env::var(name)
@@ -140,48 +199,8 @@ fn cmd_import(name: &str, force: bool) -> Result<()> {
     cmd_add(&pair, force)
 }
 
-fn cmd_add(pair: &str, force: bool) -> Result<()> {
-    let (k, v) = pair.split_once('=').ok_or_else(|| anyhow!("expected KEY=VALUE"))?;
-    if !store::valid_key(k) {
-        bail!("invalid key: {k:?}");
-    }
-    if v.contains('\n') {
-        bail!("value must not contain newlines");
-    }
-
-    let path = store_path();
-    if path.exists() {
-        let u = open_existing(&path)?;
-        let mut entries = u.entries;
-        let existing = entries.iter().position(|(ek, _)| ek == k);
-        let verb = if let Some(idx) = existing {
-            if !force && !confirm_overwrite(k)? {
-                bail!("aborted");
-            }
-            entries[idx].1 = v.to_string();
-            "updated"
-        } else {
-            entries.push((k.to_string(), v.to_string()));
-            "added"
-        };
-        store::write_store(&path, &u.header.wrapped_dk, &u.dk, &entries)?;
-        eprintln!("s: {verb} {k}");
-    } else {
-        let pp = prompt::new()?;
-        let dk = store::new_dk()?;
-        let wrapped = store::wrap_dk(&pp, &dk)?;
-        let entries = vec![(k.to_string(), v.to_string())];
-        store::write_store(&path, &wrapped, &dk, &entries)?;
-        ticket::save_dk(&path, &wrapped, &dk, Duration::from_secs(TICKET_LIFETIME_SECS))?;
-        eprintln!("s: added {k}");
-    }
-    Ok(())
-}
-
-/// Ask the user to confirm an overwrite. Reads from /dev/tty so piped stdin
-/// cannot silently answer "yes". Returns false when no TTY is available.
 fn confirm_overwrite(key: &str) -> Result<bool> {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader};
     let tty = match std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty") {
         Ok(f) => f,
         Err(_) => {
@@ -197,35 +216,99 @@ fn confirm_overwrite(key: &str) -> Result<bool> {
     Ok(matches!(line.trim(), "y" | "Y" | "yes" | "YES"))
 }
 
+// --- list / exec / status ------------------------------------------------
+
 fn cmd_list() -> Result<()> {
     let path = store_path();
     if !path.exists() {
         eprintln!("s: no {STORE_FILE} here");
         return Ok(());
     }
-    let u = open_existing(&path)?;
-    if u.entries.is_empty() {
-        eprintln!("s: (empty)");
-        return Ok(());
-    }
-    for (k, _) in &u.entries {
-        println!("{k}");
+    let file = store::SenvFile::load(&path)?;
+    if file.keys.is_empty() {
+        eprintln!("s: (no keys)");
+    } else {
+        for k in file.keys.keys() {
+            println!("{k}");
+        }
     }
     Ok(())
+}
+
+fn cmd_exec(args: Vec<String>) -> Result<()> {
+    let path = store_path();
+    if !path.exists() {
+        bail!("no {STORE_FILE} here");
+    }
+    let entries = decrypt_all(&path)?;
+
+    let mut cmd = Command::new(&args[0]);
+    cmd.args(&args[1..]);
+    for (k, v) in &entries {
+        cmd.env(k, v);
+    }
+
+    let secrets: Vec<Vec<u8>> = entries
+        .iter()
+        .map(|(_, v)| v.as_bytes().to_vec())
+        .filter(|v| !v.is_empty())
+        .collect();
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    cmd.stdin(Stdio::inherit());
+
+    let mut child = cmd.spawn().with_context(|| format!("spawn {}", &args[0]))?;
+    let mut out = child.stdout.take().unwrap();
+    let mut err = child.stderr.take().unwrap();
+    let sa = secrets.clone();
+    let sb = secrets;
+    let t1 = std::thread::spawn(move || scrub::copy(&mut out, &mut std::io::stdout(), &sa));
+    let t2 = std::thread::spawn(move || scrub::copy(&mut err, &mut std::io::stderr(), &sb));
+    let status = child.wait().context("wait child")?;
+    let _ = t1.join();
+    let _ = t2.join();
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+/// Decrypt every `keys` entry. Uses the session ticket if valid; otherwise
+/// loads the SSH identity, decrypts, and writes a fresh ticket.
+fn decrypt_all(path: &Path) -> Result<Vec<(String, String)>> {
+    let file = store::SenvFile::load(path)?;
+    let digest = file.hosts_digest();
+    if let Some(cached) = ticket::try_load_entries(path, &digest)? {
+        return Ok(cached);
+    }
+    if file.keys.is_empty() {
+        // Nothing to decrypt; don't force an identity load.
+        ticket::save_entries(path, &digest, &[], Duration::from_secs(TICKET_LIFETIME_SECS))?;
+        return Ok(Vec::new());
+    }
+    let id_path = identity::discover()?;
+    let id = identity::load(&id_path)?;
+    let mut out: Vec<(String, String)> = Vec::with_capacity(file.keys.len());
+    for (k, blob) in &file.keys {
+        let v = store::decrypt_value(blob, id.as_age())
+            .with_context(|| format!("decrypting {k}"))?;
+        out.push((k.clone(), v));
+    }
+    ticket::save_entries(path, &digest, &out, Duration::from_secs(TICKET_LIFETIME_SECS))?;
+    Ok(out)
 }
 
 fn cmd_unlock() -> Result<()> {
     let path = store_path();
     if !path.exists() {
-        bail!("no {STORE_FILE} in current directory");
+        bail!("no {STORE_FILE} here");
     }
-    // Force a fresh ticket — "unlock" always means a new 7-day window.
+    // Force a fresh ticket.
     ticket::delete(&path)?;
-    let u = open_existing(&path)?;
-    let remaining = ticket::remaining_secs(&path, &u.header.wrapped_dk)?.unwrap_or(0);
+    let entries = decrypt_all(&path)?;
+    let file = store::SenvFile::load(&path)?;
+    let remaining = ticket::remaining_secs(&path, &file.hosts_digest())?.unwrap_or(0);
     eprintln!(
         "s: unlocked ({} entries) — ticket valid for {}",
-        u.entries.len(),
+        entries.len(),
         fmt_duration(remaining)
     );
     Ok(())
@@ -241,59 +324,119 @@ fn cmd_lock() -> Result<()> {
 fn cmd_status() -> Result<()> {
     let path = store_path();
     if !path.exists() {
-        println!("store:   none ({STORE_FILE} does not exist)");
+        println!("store:   none");
         return Ok(());
     }
-    let raw = std::fs::read(&path)?;
-    if !store::is_v1(&raw) {
-        println!("store:   not a v1 s store (unknown format)");
-        return Ok(());
+    let file = store::SenvFile::load(&path)?;
+    println!("store:   {} ({} keys, {} hosts)", path.display(), file.keys.len(), file.hosts.len());
+    for (name, pk) in &file.hosts {
+        println!("  host {name}: {}", store::fingerprint(pk));
     }
-    let header = store::parse_header(&raw)?;
-    println!("store:   v1, {} bytes", raw.len());
-    match ticket::remaining_secs(&path, &header.wrapped_dk)? {
+    match ticket::remaining_secs(&path, &file.hosts_digest())? {
         Some(secs) => println!("session: unlocked — {} remaining", fmt_duration(secs)),
         None => println!("session: locked"),
     }
     Ok(())
 }
 
-fn cmd_exec(args: Vec<String>) -> Result<()> {
+// --- hosts subcommand ----------------------------------------------------
+
+fn cmd_hosts(args: &[String]) -> Result<()> {
+    if args.is_empty() {
+        return hosts_list();
+    }
+    match args[0].as_str() {
+        "add" => {
+            if args.len() != 3 {
+                bail!("usage: s hosts add NAME <pubkey|path>");
+            }
+            hosts_add(&args[1], &args[2])
+        }
+        "remove" | "rm" => {
+            if args.len() != 2 {
+                bail!("usage: s hosts remove NAME");
+            }
+            hosts_remove(&args[1])
+        }
+        other => bail!("unknown: s hosts {other}"),
+    }
+}
+
+fn hosts_list() -> Result<()> {
     let path = store_path();
     if !path.exists() {
-        bail!("no {STORE_FILE} here — run `s add KEY=VALUE` first");
+        bail!("no {STORE_FILE} here");
     }
-    let u = open_existing(&path)?;
-
-    let mut cmd = Command::new(&args[0]);
-    cmd.args(&args[1..]);
-    for (k, v) in &u.entries {
-        cmd.env(k, v);
+    let file = store::SenvFile::load(&path)?;
+    if file.hosts.is_empty() {
+        eprintln!("s: (no hosts)");
+        return Ok(());
     }
+    for (name, pk) in &file.hosts {
+        println!("{name}  {}  {}", store::fingerprint(pk), pk.split_whitespace().next().unwrap_or(""));
+    }
+    Ok(())
+}
 
-    let secrets: Vec<Vec<u8>> = u
-        .entries
-        .iter()
-        .map(|(_, v)| v.as_bytes().to_vec())
-        .filter(|v| !v.is_empty())
-        .collect();
+fn hosts_add(name: &str, key_or_path: &str) -> Result<()> {
+    if !store::valid_host_name(name) {
+        bail!("invalid host name: {name:?}");
+    }
+    let line = if std::path::Path::new(key_or_path).exists() {
+        std::fs::read_to_string(key_or_path)
+            .with_context(|| format!("reading {key_or_path}"))?
+    } else {
+        key_or_path.to_string()
+    };
+    let pubkey = store::validate_pubkey_line(&line)?;
 
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    cmd.stdin(Stdio::inherit());
+    let path = store_path();
+    let mut file = store::SenvFile::load(&path)?;
+    if file.hosts.contains_key(name) {
+        bail!("host {name} already exists");
+    }
+    file.hosts.insert(name.to_string(), pubkey);
+    rewrap_all(&path, &mut file)?;
+    eprintln!("s: added host {name}; re-wrapped {} key(s)", file.keys.len());
+    Ok(())
+}
 
-    let mut child = cmd.spawn().with_context(|| format!("spawn {}", &args[0]))?;
-    let mut out = child.stdout.take().unwrap();
-    let mut err = child.stderr.take().unwrap();
-    let sa = secrets.clone();
-    let sb = secrets;
+fn hosts_remove(name: &str) -> Result<()> {
+    let path = store_path();
+    let mut file = store::SenvFile::load(&path)?;
+    if file.hosts.remove(name).is_none() {
+        bail!("no host named {name}");
+    }
+    if file.hosts.is_empty() {
+        bail!("refusing to remove last host (would make the store unrecoverable)");
+    }
+    rewrap_all(&path, &mut file)?;
+    eprintln!("s: removed host {name}; re-wrapped {} key(s)", file.keys.len());
+    Ok(())
+}
 
-    let t1 = std::thread::spawn(move || scrub::copy(&mut out, &mut std::io::stdout(), &sa));
-    let t2 = std::thread::spawn(move || scrub::copy(&mut err, &mut std::io::stderr(), &sb));
-    let status = child.wait().context("wait child")?;
-    let _ = t1.join();
-    let _ = t2.join();
-    std::process::exit(status.code().unwrap_or(1));
+/// Re-encrypt every value in `file.keys` for the current `file.hosts`.
+fn rewrap_all(path: &Path, file: &mut store::SenvFile) -> Result<()> {
+    if !file.keys.is_empty() {
+        // Need to decrypt first — load identity.
+        let id_path = identity::discover()?;
+        let id = identity::load(&id_path)?;
+        let mut plain = std::collections::BTreeMap::new();
+        for (k, blob) in &file.keys {
+            let v = store::decrypt_value(blob, id.as_age())
+                .with_context(|| format!("decrypting {k}"))?;
+            plain.insert(k.clone(), v);
+        }
+        file.keys.clear();
+        for (k, v) in &plain {
+            let recipients = file.recipients()?;
+            let blob = store::encrypt_value(v, recipients)?;
+            file.keys.insert(k.clone(), blob);
+        }
+    }
+    file.save(path)?;
+    let _ = ticket::delete(path);
+    Ok(())
 }
 
 fn fmt_duration(secs: u64) -> String {

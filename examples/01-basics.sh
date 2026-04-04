@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Basic lifecycle: add, list, exec, lock, unlock, status.
-# Run with a throwaway passphrase via S_PASSPHRASE so it's non-interactive.
+# Lifecycle: init, add, list, exec, unlock/lock, status.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -10,37 +9,38 @@ WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
 export S_TICKET_DIR="$WORK/tickets"
 cd "$WORK"
 
-echo "==> add three secrets (first one creates the store)"
-S_PASSPHRASE=demo "$S" add API_KEY=sk-live-supersecret123
-S_PASSPHRASE=demo "$S" add DB_URL=postgres://u:p@h/db
-S_PASSPHRASE=demo "$S" add FOO=bar
+echo "==> init (picks up this host's ~/.ssh/id_ed25519)"
+"$S" init laptop
 
 echo
-echo "==> list"
+echo "==> add three secrets (no identity required — only public keys are used)"
+"$S" add API_KEY=sk-live-supersecret123
+"$S" add DB_URL=postgres://u:p@h/db
+"$S" add FOO=bar
+
+echo
+echo "==> the YAML file is inspectable:"
+cat .senv | head -8
+echo "   ..."
+
+echo
+echo "==> list (also no identity required)"
 "$S" list
 
 echo
-echo "==> status (note: ticket valid for ~7d)"
+echo "==> status"
 "$S" status
 
 echo
-echo "==> run a command with the env injected"
+echo "==> exec — decrypts, injects into env, scrubs echoes. Identity is loaded"
+echo "    once, then cached in a 7-day ticket."
 "$S" -- bash -c 'echo "API_KEY=$API_KEY  FOO=$FOO"'
 
 echo
-echo "==> the same command, but the secret value is scrubbed on echo"
-"$S" -- bash -c 'echo "leaking: $API_KEY here, and $DB_URL too"'
+echo "==> second exec: uses the ticket, no identity touch"
+"$S" -- bash -c 'echo "still scrubbed: $DB_URL"'
 
 echo
 echo "==> lock"
 "$S" lock
-"$S" status
-
-echo
-echo "==> after locking, list without a passphrase fails"
-"$S" list 2>&1 || true
-
-echo
-echo "==> give passphrase again → fresh 7-day ticket"
-S_PASSPHRASE=demo "$S" unlock
 "$S" status

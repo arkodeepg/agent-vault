@@ -1,6 +1,6 @@
 [package]
 name = "s"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 [[bin]]
@@ -8,12 +8,15 @@ name = "s"
 path = "src/main.rs"
 
 [dependencies]
-rpassword = "7"
 anyhow = "1"
+rpassword = "7"
+age = { version = "0.11", default-features = false, features = ["ssh"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+base64 = "0.22"
 chacha20poly1305 = "0.10"
 hkdf = "0.12"
 sha2 = "0.10"
-argon2 = "0.5"
 getrandom = "0.2"
 
 [profile.release]

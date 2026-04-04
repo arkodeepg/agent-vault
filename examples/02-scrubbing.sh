@@ -10,7 +10,8 @@ WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
 export S_TICKET_DIR="$WORK/tickets"
 cd "$WORK"
 
-S_PASSPHRASE=demo "$S" add TOKEN=abcdef1234567890XYZ
+"$S" init demo
+"$S" add TOKEN=abcdef1234567890XYZ
 
 echo "==> plain echo: scrubbed"
 "$S" -- sh -c 'echo "token is $TOKEN right here"'

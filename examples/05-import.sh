@@ -14,8 +14,10 @@ cd "$WORK"
 export OPENAI_API_KEY="sk-proj-abc123xyz"
 export GITHUB_TOKEN="ghp_deadbeefcafef00d"
 
+"$S" init demo
+
 echo "==> import two values from the current shell env"
-S_PASSPHRASE=demo "$S" import OPENAI_API_KEY
+"$S" import OPENAI_API_KEY
 "$S" import GITHUB_TOKEN
 "$S" list
 
@@ -30,5 +32,5 @@ echo "==> importing a non-existent var fails"
 echo
 echo "==> -f overwrites an existing key from a rotated env var"
 export OPENAI_API_KEY="sk-proj-rotated-key"
-"$S" import OPENAI_API_KEY -f
+"$S" import -f OPENAI_API_KEY
 "$S" -- bash -c 'echo "new=$OPENAI_API_KEY"'

@@ -1,177 +1,186 @@
 # Secret Exec (`s`)
 
-Tiny encrypted env store with a 7-day, boot-clock-bound session.
+Tiny encrypted env store with per-entry encryption, SSH-key-based multi-host
+recipients, and a 7-day boot-clock-bound session.
 
-`s` keeps a small, passphrase-encrypted `.senv` file next to your project
-(think `.env`, but encrypted) and lets you run commands with those variables
-in their environment. Re-echoes of the secret values on stdout/stderr are
-scrubbed. After you enter the passphrase once, subsequent uses are
-passphrase-free for **7 days of boot-clock time**, enforced by the kernel —
-no wall-clock trust, no honor system.
+```
+s init [NAME]                 create ./.senv, add this host as a recipient
+s add [-f] KEY=VALUE          add a variable (no identity required)
+s import [-f] NAME            copy $NAME from the current env into the store
+s list                        list variable names
+s hosts                       list authorized hosts
+s hosts add NAME <key|path>   authorize another host; re-wrap all values
+s hosts remove NAME           revoke a host; re-wrap all values
+s unlock                      start/refresh 7-day session (uses SSH identity)
+s lock                        end session (delete ticket)
+s status                      show store + hosts + session
+s -- <cmd> [args...]          run cmd with vars in env, scrubbing echoes
+```
+
+Env overrides: `S_IDENTITY` (SSH private key path, default `~/.ssh/id_ed25519`)
+and `S_TICKET_DIR` (session ticket location).
+
+## The file
+
+`.senv` is a small, inspectable YAML:
+
+```yaml
+hosts:
+  laptop: "ssh-ed25519 AAAAC3Nz... tobi@laptop"
+  agent:  "ssh-ed25519 AAAAC3Nz... agent@box"
+keys:
+  OPENAI_API_KEY: "YWdlLWVuY3J5cHRpb24ub3JnL3Yx..."
+  DB_URL:         "YWdlLWVuY3J5cHRpb24ub3JnL3Yx..."
+```
+
+Each value under `keys` is an independent `age`-encrypted blob (base64'd),
+wrapped to every recipient under `hosts`. Any host whose private key is on
+the machine can decrypt.
+
+## What needs an identity and what doesn't
+
+| Operation | Needs SSH identity? | Why |
+|---|---|---|
+| `s init` | public only | reads `~/.ssh/id_*.pub` to seed `hosts` |
+| `s add`, `s import` | **no** | just encrypts to the listed recipients |
+| `s list`, `s status`, `s hosts` | no | YAML is readable |
+| `s -- cmd`, `s unlock` | yes (or valid ticket) | decrypts values |
+| `s hosts add/remove` | yes | must re-wrap every value for the new recipient set |
+
+This breaks the skeleton-key problem of the old passphrase-based design:
+a process/agent that can only *write* secrets no longer needs any crypto
+material. Only the decrypt side carries a "skeleton", and even then it's an
+SSH key file bound to physical possession of the machine, not a memorisable
+string.
 
 ## Designed for AI coding agents
 
-The primary use case is letting an AI agent (Claude Code, Cursor, Aider, etc.)
-call APIs on your behalf **without ever seeing the secret value itself**.
-
-You unlock once:
+The primary use case is letting an AI agent run shell commands with your
+secrets in their environment, **without ever seeing the secret values
+themselves**.
 
 ```bash
-s add OPENAI_API_KEY=sk-proj-abc123...xyz
+# One-time setup
+s init laptop
+s add OPENAI_API_KEY=sk-proj-abc...xyz
 s add STRIPE_SECRET=sk_live_...
-# or pull from an existing shell env (e.g. the one you just `env`-loaded):
-s import GITHUB_TOKEN
-s unlock                  # enter passphrase; 7-day session begins
-```
+s import GITHUB_TOKEN                 # pull from shell env if already loaded
+s unlock                              # 7-day session begins
 
-Then you let the agent run shell commands through `s --`:
-
-```bash
+# The agent then runs shell commands through `s --`:
 s -- curl -H "Authorization: Bearer $OPENAI_API_KEY" https://api.openai.com/v1/models
 s -- psql "$DATABASE_URL" -c 'select count(*) from users'
 s -- bash -c 'gh api /user --header "Authorization: token $GITHUB_TOKEN"'
 ```
 
-The child process receives the real values in its environment. **The agent
-never does** — if the command (or anything it spawns) echoes the secret to
-stdout/stderr, `s` rewrites it to `***` before the agent sees it:
+The child receives real values in its environment. **The agent never does**:
+if the command (or anything it spawns) echoes a secret on stdout/stderr, `s`
+rewrites it to `***` before the agent sees it.
 
 ```
 $ s -- bash -c 'echo "calling with $OPENAI_API_KEY"'
 calling with ***
 ```
 
-This means:
+Consequences:
 
-- Secrets never enter the agent's context window, so they can't be leaked
-  through a future prompt, a mis-behaved tool, or an exfiltration attempt.
-- Secrets never land in agent transcripts / logs / screen recordings.
-- The 7-day ticket means the agent doesn't need to know the passphrase
-  either — it just runs `s -- ...` and it works, until the session expires.
-- `s lock` instantly revokes the agent's ability to use any stored secret,
-  without changing the secrets themselves.
+- Secrets don't enter the agent's context, transcripts, or logs.
+- The 7-day ticket means the agent never needs your SSH key or passphrase.
+- `s lock` instantly revokes the agent's ability to decrypt anything,
+  without rotating the secrets themselves.
+- `s hosts remove <agent-host>` permanently revokes from that box.
 
-Threat model caveat: the child process (curl, psql, etc.) still sees the real
-value; a malicious tool the agent invokes can still exfiltrate. `s` protects
-against leaks through the **agent's own I/O channels**, not against a
-compromised binary you hand the env to.
+## 7-day session ticket (boot-clock-bound)
 
-Env overrides: `S_PASSPHRASE` (non-interactive passphrase), `S_TICKET_DIR`
-(override ticket location, e.g. for per-project caches or tests).
-
-```
-s add [-f] KEY=VALUE  add to ./.senv (-f overwrites, else prompts if exists)
-s import [-f] NAME    copy $NAME from the current env into the store
-s list                list key names
-s unlock              start/refresh a 7-day session (prompts passphrase)
-s lock                end session (deletes the ticket)
-s status              show session state
-s -- <cmd> [args...]  run cmd with stored vars in env, scrubbing echoes
-```
-
-## How the encryption works
-
-Two layers:
-
-1. **Passphrase → data key (DK)** via Argon2id (64 MiB, t=3, p=1), wrapped
-   with ChaCha20-Poly1305.
-2. **DK → payload** (`KEY=VALUE\n` lines), again ChaCha20-Poly1305.
-
-Binary layout of `.senv`:
-
-```
-magic "S1\0"          3 bytes
-wdk_len (u32 LE)      4 bytes
-wrapped_dk            81 bytes     <- "WDK1\0" + salt + nonce + AEAD(KEK, DK)
-nonce                 12 bytes
-ciphertext            len(payload) + 16
-```
-
-The payload's AEAD has the whole header (incl. `wrapped_dk`) as AAD, so the
-ciphertext is cryptographically bound to the specific wrapped DK.
-
-## How the 7-day session works
-
-After a successful passphrase unlock, `s` writes a small **ticket** file at
+After an identity-authenticated operation, `s` writes a ticket at
 `$XDG_CACHE_HOME/s/<sha256(abs(.senv))>.ticket` (Linux) or
-`~/Library/Caches/s/…` (macOS).
+`~/Library/Caches/s/…` (macOS). The ticket AEAD-encrypts the decrypted
+entries map.
 
-The ticket stores an AEAD-encrypted copy of the DK. The ticket-encryption key
-is derived from kernel-sourced inputs:
+Ticket key:
 
 ```
 TK = HKDF-SHA256(
-  ikm  = boot_id,                    // Linux: /proc/sys/kernel/random/boot_id
-                                     // macOS: sysctl kern.boottime
-  salt = ticket.salt,                // fresh per ticket
-  info = "s-ticket-v1|"
+  ikm  = boot_id,                  // /proc/sys/kernel/random/boot_id (Linux)
+                                   // sysctl kern.boottime (macOS)
+  salt = ticket.salt,              // fresh per ticket
+  info = "s-ticket-v2|"
          || sha256(abs_store_path)
-         || "|" || sha256(wrapped_dk)
+         || "|" || sha256(hosts-block)
          || "|" || uid
 )
 ```
 
-Expiry is stored as an absolute value of a **monotonic boot-clock**:
-
-- Linux: `clock_gettime(CLOCK_BOOTTIME)`
-- macOS: `clock_gettime(CLOCK_MONOTONIC)` (on Darwin this one ticks through sleep)
-
-Both clocks are kernel-sourced, monotonic, and not settable by userspace. They
-tick through sleep/hibernate and reset at reboot.
+Expiry is stored as an absolute value of a monotonic boot-clock
+(`CLOCK_BOOTTIME` on Linux, `CLOCK_MONOTONIC` on Darwin — both tick through
+sleep on their respective OS). These clocks are kernel-sourced, count
+through hibernate, and are not settable by userspace.
 
 ### What this enforces
 
 | Event | What happens |
 |---|---|
-| Reboot | `boot_id` rotates → TK unrecoverable → ticket's AEAD auth fails. Crypto-enforced. |
-| 7 days elapsed | `boot_clock_now >= expiry` → ticket rejected. Kernel-sourced, unforgeable. |
-| Suspend/hibernate used to "pause the clock" | Doesn't work — both clocks tick through sleep. |
-| Wall-clock jump (`date -s`, NTP) | Irrelevant — we don't read the wall clock for expiry. |
-| Editing the ticket file (expiry, nonce, …) | AAD includes all header fields → AEAD auth fails → rejected. |
-| Store (`.senv`) stolen off the box | Passphrase still required. No DK ever leaves wrapped form outside this machine. |
-| Ticket stolen off the box | Useless without that machine's current `boot_id`. |
+| Reboot | `boot_id` changes → TK differs → AEAD auth fails → ticket auto-deleted |
+| 7 days elapsed | `boot_clock_now >= expiry` → rejected (kernel-authoritative) |
+| Host added/removed | `hosts-block` hash changes → TK differs → ticket invalidated |
+| Wall-clock jump (`date -s`, NTP) | irrelevant — we don't read wall clock |
+| Suspend / hibernate used to "pause" | both clocks tick through sleep |
+| Editing `expiry` in the ticket file | covered by AAD → auth fails |
 
-### What this does NOT protect against
+### What it doesn't protect against
 
-- **Same-uid attacker on this machine during the 7 days** — can read the
-  ticket and your `boot_id`. Accepted cost of having a passphrase-less cache.
-- **Root** — owns everything anyway.
+- **Same-uid attacker on this machine** while the ticket is valid: can read
+  both the ticket and `boot_id`. Accepted cache cost.
+- **Root**: owns everything anyway.
+- **A compromised binary** you pass the env to via `s -- cmd`: still sees
+  real values and can exfiltrate them. Scrubbing only covers *echo* back
+  through the agent's own I/O channels.
 
 ## Output scrubbing
 
-`s -- cmd` pipes stdout/stderr through a byte-literal scrubber that replaces
-any occurrence of any stored secret with `***`, using a sliding tail buffer
-so secrets split across reads are still caught.
+`s -- cmd` pipes the child's stdout/stderr through a byte-literal scrubber
+that replaces occurrences of any stored value with `***`, using a sliding
+tail buffer so secrets split across reads are still caught.
 
-Limitations:
-
-- The child does not see a TTY (pipes are used). Programs that check
-  `isatty()` will change behaviour — no color, line-buffered stdout.
-- The scrubber is literal. If a program re-encodes the secret (base64, JSON
-  escapes, URL-encoding) before printing it, that encoding will leak.
-- stdin is inherited unchanged.
+Caveats: the child doesn't see a TTY (pipes are used), and scrubbing is
+literal — a program that re-encodes a secret (base64, JSON-escape,
+URL-encode) before printing it will leak that encoding.
 
 ## Examples
 
-See `examples/` for runnable scripts.
+Runnable scripts in `examples/`. Each uses its own `$S_TICKET_DIR` so they
+don't touch your real session.
 
-## Build
+```
+examples/01-basics.sh              init, add, list, exec, lock
+examples/02-scrubbing.sh           scrubber behaviour + byte-by-byte test
+examples/03-multi-host.sh          authorize + revoke a second host
+examples/04-overwrite.sh           -f vs /dev/tty confirmation prompt
+examples/05-import.sh              pulling values from the shell env
+```
+
+## Build / install
 
 ```
 cargo build --release
 ./target/release/s help
+
+# or via nix flake:
+nix build .#s
+nix profile add .#s
 ```
 
-Runtime deps: glibc. Supported on Linux and macOS.
-
-## Files
+## File layout
 
 ```
 src/
-├── main.rs      CLI dispatch, commands, exec-with-scrub
-├── store.rs     .senv v1 format: Argon2id-wrapped DK + ChaCha20Poly1305 payload
-├── ticket.rs    session ticket: HKDF(boot_id), boot-clock expiry
+├── main.rs      CLI dispatch, commands, scrubbed child exec
+├── store.rs     YAML load/save, per-entry age encrypt/decrypt
+├── identity.rs  discover + load SSH private key (with passphrase prompt)
+├── ticket.rs    session ticket cache, hosts-bound HKDF, boot-clock expiry
 ├── sysinfo.rs   per-OS: boot_id, boot_clock_ns, uid
-├── scrub.rs     sliding-window secret scrubber for child I/O
-└── prompt.rs    rpassword wrapper + S_PASSPHRASE env override
+└── scrub.rs     sliding-window secret scrubber for child I/O
 ```
+
+Supported on Linux and macOS. SSH keys: ed25519 (rsa also works via age but
+`init` currently picks `~/.ssh/id_ed25519` or `~/.ssh/hostkey`).

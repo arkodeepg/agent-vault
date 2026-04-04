@@ -1,28 +1,27 @@
-// Session ticket: caches the store's data key (DK) for a bounded time.
+// Session ticket: caches the fully-decrypted set of entries for a store.
 //
 // File format (binary):
-//   magic           "STKT1\0"                     6 bytes
-//   salt            per-ticket random             32 bytes
-//   nonce           AEAD nonce                    12 bytes
-//   expiry_boot_ns  kernel boot-clock deadline    8 bytes (u64 LE)
-//   ciphertext      ChaCha20Poly1305(TK, DK, aad = all preceding bytes)
+//   magic           "STKT2\0"                        6 bytes
+//   salt                                             32 bytes
+//   nonce                                            12 bytes
+//   expiry_boot_ns  u64 LE                           8 bytes
+//   ct_len          u32 LE                           4 bytes
+//   ct              ChaCha20Poly1305(TK, kv-serialized, aad = header)
 //
-// Key schedule:
-//   TK = HKDF-SHA256(
-//     ikm  = boot_id,                // rotates at reboot
-//     salt = ticket.salt,
-//     info = "s-ticket-v1|" || sha256(abs_store_path)
-//                          || "|" || sha256(wrapped_dk)
-//                          || "|" || uid
-//   )
+// TK = HKDF-SHA256(
+//   ikm  = boot_id,
+//   salt = ticket.salt,
+//   info = "s-ticket-v2|"
+//          || sha256(abs_store_path)
+//          || "|" || hosts_digest
+//          || "|" || uid
+// )
 //
-// Expiry has two layers of enforcement, both kernel-sourced:
-//   1. reboot -> boot_id changes -> TK unrecoverable -> AEAD auth fails
-//   2. elapsed boot-clock time >= expiry_boot_ns -> refused
-//      (BOOTTIME/Darwin MONOTONIC is not settable by userspace)
+// Expiry is kernel-sourced (CLOCK_BOOTTIME on Linux, CLOCK_MONOTONIC on
+// Darwin), counts through sleep, and is not settable by userspace.
 //
-// expiry_boot_ns is also mixed into the AAD, so you can't edit it in the file
-// without breaking authentication.
+// Any host-list change → different `hosts_digest` → different TK →
+// existing tickets stop authenticating.
 
 use anyhow::{anyhow, Context, Result};
 use chacha20poly1305::{
@@ -37,18 +36,14 @@ use std::time::Duration;
 
 use crate::sysinfo;
 
-const MAGIC: &[u8; 6] = b"STKT1\0";
+const MAGIC: &[u8; 6] = b"STKT2\0";
 const SALT_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 const EXPIRY_LEN: usize = 8;
-const HEADER_LEN: usize = MAGIC.len() + SALT_LEN + NONCE_LEN + EXPIRY_LEN;
-// ChaCha20Poly1305 of a 32-byte DK is 48 bytes (32 + 16-byte tag).
-const CT_LEN: usize = 48;
-const TOTAL_LEN: usize = HEADER_LEN + CT_LEN;
+const CTLEN_LEN: usize = 4;
+const HEADER_LEN: usize = MAGIC.len() + SALT_LEN + NONCE_LEN + EXPIRY_LEN + CTLEN_LEN;
 
 pub fn cache_dir() -> PathBuf {
-    // Explicit override wins — used by tests/examples and power users who
-    // want the ticket on a specific tmpfs.
     if let Ok(d) = std::env::var("S_TICKET_DIR") {
         if !d.is_empty() {
             return PathBuf::from(d);
@@ -56,8 +51,7 @@ pub fn cache_dir() -> PathBuf {
     }
     #[cfg(target_os = "macos")]
     {
-        let home = std::env::var("HOME").unwrap_or_default();
-        PathBuf::from(home).join("Library/Caches/s")
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Library/Caches/s")
     }
     #[cfg(target_os = "linux")]
     {
@@ -66,8 +60,7 @@ pub fn cache_dir() -> PathBuf {
                 return PathBuf::from(x).join("s");
             }
         }
-        let home = std::env::var("HOME").unwrap_or_default();
-        PathBuf::from(home).join(".cache/s")
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache/s")
     }
 }
 
@@ -88,54 +81,64 @@ fn store_hash(store_path: &Path) -> [u8; 32] {
 }
 
 fn ticket_path_for(store_path: &Path) -> PathBuf {
-    let hash = store_hash(store_path);
-    cache_dir().join(format!("{}.ticket", hex(&hash)))
+    let h = store_hash(store_path);
+    let mut hex = String::with_capacity(64);
+    for b in h {
+        hex.push_str(&format!("{b:02x}"));
+    }
+    cache_dir().join(format!("{hex}.ticket"))
 }
 
-fn derive_tk(salt: &[u8], store_path: &Path, wrapped_dk: &[u8]) -> Result<[u8; 32]> {
+fn derive_tk(salt: &[u8], store_path: &Path, hosts_digest: &[u8]) -> Result<[u8; 32]> {
     let boot_id = sysinfo::boot_id()?;
     let sh = store_hash(store_path);
-    let mut wh = Sha256::new();
-    wh.update(wrapped_dk);
-    let wh = wh.finalize();
     let uid = sysinfo::uid();
 
-    let mut info = Vec::with_capacity(12 + 32 + 1 + 32 + 1 + 4);
-    info.extend_from_slice(b"s-ticket-v1|");
+    let mut info = Vec::with_capacity(12 + 32 + 1 + hosts_digest.len() + 1 + 4);
+    info.extend_from_slice(b"s-ticket-v2|");
     info.extend_from_slice(&sh);
     info.extend_from_slice(b"|");
-    info.extend_from_slice(&wh);
+    info.extend_from_slice(hosts_digest);
     info.extend_from_slice(b"|");
     info.extend_from_slice(&uid.to_le_bytes());
 
     let hk = Hkdf::<Sha256>::new(Some(salt), &boot_id);
     let mut okm = [0u8; 32];
-    hk.expand(&info, &mut okm).map_err(|e| anyhow!("HKDF expand: {e}"))?;
+    hk.expand(&info, &mut okm).map_err(|e| anyhow!("HKDF: {e}"))?;
     Ok(okm)
 }
 
-/// Try to recover DK from an on-disk ticket. Returns None (and removes the
-/// ticket file) for every failure mode: missing, malformed, expired, or
-/// cross-boot (AEAD auth fails).
-pub fn try_load_dk(store_path: &Path, wrapped_dk: &[u8]) -> Result<Option<[u8; 32]>> {
+/// Try to recover the cached entries. Returns None (and removes the ticket)
+/// on any failure: missing, expired, cross-boot, or hosts-list changed.
+pub fn try_load_entries(
+    store_path: &Path,
+    hosts_digest: &[u8],
+) -> Result<Option<Vec<(String, String)>>> {
     let p = ticket_path_for(store_path);
     let raw = match std::fs::read(&p) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(anyhow!("reading ticket: {e}")),
     };
-    if raw.len() != TOTAL_LEN || &raw[..MAGIC.len()] != MAGIC {
+    if raw.len() < HEADER_LEN || &raw[..MAGIC.len()] != MAGIC {
         let _ = std::fs::remove_file(&p);
         return Ok(None);
     }
 
     let salt = &raw[MAGIC.len()..MAGIC.len() + SALT_LEN];
-    let nonce_start = MAGIC.len() + SALT_LEN;
-    let nonce = &raw[nonce_start..nonce_start + NONCE_LEN];
-    let expiry_start = nonce_start + NONCE_LEN;
-    let expiry = u64::from_le_bytes(
-        raw[expiry_start..expiry_start + EXPIRY_LEN].try_into().unwrap(),
-    );
+    let nonce_off = MAGIC.len() + SALT_LEN;
+    let nonce = &raw[nonce_off..nonce_off + NONCE_LEN];
+    let exp_off = nonce_off + NONCE_LEN;
+    let expiry =
+        u64::from_le_bytes(raw[exp_off..exp_off + EXPIRY_LEN].try_into().unwrap());
+    let ctlen_off = exp_off + EXPIRY_LEN;
+    let ct_len =
+        u32::from_le_bytes(raw[ctlen_off..ctlen_off + CTLEN_LEN].try_into().unwrap()) as usize;
+
+    if raw.len() != HEADER_LEN + ct_len {
+        let _ = std::fs::remove_file(&p);
+        return Ok(None);
+    }
     let aad = &raw[..HEADER_LEN];
     let ct = &raw[HEADER_LEN..];
 
@@ -145,30 +148,29 @@ pub fn try_load_dk(store_path: &Path, wrapped_dk: &[u8]) -> Result<Option<[u8; 3
         return Ok(None);
     }
 
-    let tk = derive_tk(salt, store_path, wrapped_dk)?;
+    let tk = derive_tk(salt, store_path, hosts_digest)?;
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&tk));
-    let dk_vec = match cipher.decrypt(Nonce::from_slice(nonce), Payload { msg: ct, aad }) {
+    let pt = match cipher.decrypt(Nonce::from_slice(nonce), Payload { msg: ct, aad }) {
         Ok(v) => v,
         Err(_) => {
-            // After reboot boot_id differs → TK differs → auth fails.
             let _ = std::fs::remove_file(&p);
             return Ok(None);
         }
     };
-    if dk_vec.len() != 32 {
-        let _ = std::fs::remove_file(&p);
-        return Ok(None);
-    }
-    let mut dk = [0u8; 32];
-    dk.copy_from_slice(&dk_vec);
-    Ok(Some(dk))
+    let text = match std::str::from_utf8(&pt) {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = std::fs::remove_file(&p);
+            return Ok(None);
+        }
+    };
+    Ok(Some(parse_kv(text)))
 }
 
-/// Write a fresh ticket with `now_boot + lifetime` as the deadline.
-pub fn save_dk(
+pub fn save_entries(
     store_path: &Path,
-    wrapped_dk: &[u8],
-    dk: &[u8; 32],
+    hosts_digest: &[u8],
+    entries: &[(String, String)],
     lifetime: Duration,
 ) -> Result<()> {
     let p = ticket_path_for(store_path);
@@ -191,23 +193,27 @@ pub fn save_dk(
     let life_ns = lifetime.as_secs().saturating_mul(1_000_000_000);
     let expiry = now.saturating_add(life_ns);
 
+    let kv = serialize_kv(entries);
+    let ct_len: u32 = (kv.len() + 16)
+        .try_into()
+        .map_err(|_| anyhow!("ticket payload too large"))?;
+
     let mut header = Vec::with_capacity(HEADER_LEN);
     header.extend_from_slice(MAGIC);
     header.extend_from_slice(&salt);
     header.extend_from_slice(&nonce);
     header.extend_from_slice(&expiry.to_le_bytes());
+    header.extend_from_slice(&ct_len.to_le_bytes());
 
-    let tk = derive_tk(&salt, store_path, wrapped_dk)?;
+    let tk = derive_tk(&salt, store_path, hosts_digest)?;
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&tk));
     let ct = cipher
-        .encrypt(Nonce::from_slice(&nonce), Payload { msg: dk, aad: &header })
+        .encrypt(Nonce::from_slice(&nonce), Payload { msg: kv.as_bytes(), aad: &header })
         .map_err(|e| anyhow!("encrypt ticket: {e}"))?;
 
     let mut out = header;
     out.extend_from_slice(&ct);
-    debug_assert_eq!(out.len(), TOTAL_LEN);
 
-    // Atomic 0600 write.
     let tmp = p.with_extension("tmp");
     {
         let mut opts = std::fs::OpenOptions::new();
@@ -221,7 +227,7 @@ pub fn save_dk(
         f.write_all(&out)?;
         f.sync_all()?;
     }
-    std::fs::rename(&tmp, &p).context("rename ticket into place")?;
+    std::fs::rename(&tmp, &p).context("rename ticket")?;
     Ok(())
 }
 
@@ -234,25 +240,27 @@ pub fn delete(store_path: &Path) -> Result<()> {
     }
 }
 
-/// Returns seconds remaining if a valid ticket exists for this store, else None.
-/// Performs the full AEAD verify so the result reflects crypto validity, not
-/// just the filesystem.
-pub fn remaining_secs(store_path: &Path, wrapped_dk: &[u8]) -> Result<Option<u64>> {
+pub fn remaining_secs(store_path: &Path, hosts_digest: &[u8]) -> Result<Option<u64>> {
     let p = ticket_path_for(store_path);
     let raw = match std::fs::read(&p) {
         Ok(b) => b,
         Err(_) => return Ok(None),
     };
-    if raw.len() != TOTAL_LEN || &raw[..MAGIC.len()] != MAGIC {
+    if raw.len() < HEADER_LEN || &raw[..MAGIC.len()] != MAGIC {
         return Ok(None);
     }
     let salt = &raw[MAGIC.len()..MAGIC.len() + SALT_LEN];
-    let nonce_start = MAGIC.len() + SALT_LEN;
-    let nonce = &raw[nonce_start..nonce_start + NONCE_LEN];
-    let expiry_start = nonce_start + NONCE_LEN;
-    let expiry = u64::from_le_bytes(
-        raw[expiry_start..expiry_start + EXPIRY_LEN].try_into().unwrap(),
-    );
+    let nonce_off = MAGIC.len() + SALT_LEN;
+    let nonce = &raw[nonce_off..nonce_off + NONCE_LEN];
+    let exp_off = nonce_off + NONCE_LEN;
+    let expiry =
+        u64::from_le_bytes(raw[exp_off..exp_off + EXPIRY_LEN].try_into().unwrap());
+    let ctlen_off = exp_off + EXPIRY_LEN;
+    let ct_len =
+        u32::from_le_bytes(raw[ctlen_off..ctlen_off + CTLEN_LEN].try_into().unwrap()) as usize;
+    if raw.len() != HEADER_LEN + ct_len {
+        return Ok(None);
+    }
     let aad = &raw[..HEADER_LEN];
     let ct = &raw[HEADER_LEN..];
 
@@ -260,7 +268,7 @@ pub fn remaining_secs(store_path: &Path, wrapped_dk: &[u8]) -> Result<Option<u64
     if now >= expiry {
         return Ok(None);
     }
-    let tk = derive_tk(salt, store_path, wrapped_dk)?;
+    let tk = derive_tk(salt, store_path, hosts_digest)?;
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&tk));
     if cipher
         .decrypt(Nonce::from_slice(nonce), Payload { msg: ct, aad })
@@ -271,10 +279,23 @@ pub fn remaining_secs(store_path: &Path, wrapped_dk: &[u8]) -> Result<Option<u64
     Ok(Some((expiry - now) / 1_000_000_000))
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{b:02x}"));
+fn serialize_kv(entries: &[(String, String)]) -> String {
+    let mut s = String::new();
+    for (k, v) in entries {
+        s.push_str(k);
+        s.push('=');
+        s.push_str(v);
+        s.push('\n');
     }
     s
+}
+
+fn parse_kv(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            out.push((k.to_string(), v.to_string()));
+        }
+    }
+    out
 }
