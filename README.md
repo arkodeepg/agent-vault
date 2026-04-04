@@ -3,11 +3,56 @@
 Tiny encrypted env store with a 7-day, boot-clock-bound session.
 
 `s` keeps a small, passphrase-encrypted `.senv` file next to your project
-(think `.env`, but encrypted and append-only) and lets you run commands with
-those variables in their environment. Re-echoes of the secret values on
-stdout/stderr are scrubbed. After you enter the passphrase once, subsequent
-uses are passphrase-free for **7 days of boot-clock time**, enforced by the
-kernel — no wall-clock trust, no honor system.
+(think `.env`, but encrypted) and lets you run commands with those variables
+in their environment. Re-echoes of the secret values on stdout/stderr are
+scrubbed. After you enter the passphrase once, subsequent uses are
+passphrase-free for **7 days of boot-clock time**, enforced by the kernel —
+no wall-clock trust, no honor system.
+
+## Designed for AI coding agents
+
+The primary use case is letting an AI agent (Claude Code, Cursor, Aider, etc.)
+call APIs on your behalf **without ever seeing the secret value itself**.
+
+You unlock once:
+
+```bash
+s add OPENAI_API_KEY=sk-proj-abc123...xyz
+s add STRIPE_SECRET=sk_live_...
+s unlock                  # enter passphrase; 7-day session begins
+```
+
+Then you let the agent run shell commands through `s --`:
+
+```bash
+s -- curl -H "Authorization: Bearer $OPENAI_API_KEY" https://api.openai.com/v1/models
+s -- psql "$DATABASE_URL" -c 'select count(*) from users'
+s -- bash -c 'gh api /user --header "Authorization: token $GITHUB_TOKEN"'
+```
+
+The child process receives the real values in its environment. **The agent
+never does** — if the command (or anything it spawns) echoes the secret to
+stdout/stderr, `s` rewrites it to `***` before the agent sees it:
+
+```
+$ s -- bash -c 'echo "calling with $OPENAI_API_KEY"'
+calling with ***
+```
+
+This means:
+
+- Secrets never enter the agent's context window, so they can't be leaked
+  through a future prompt, a mis-behaved tool, or an exfiltration attempt.
+- Secrets never land in agent transcripts / logs / screen recordings.
+- The 7-day ticket means the agent doesn't need to know the passphrase
+  either — it just runs `s -- ...` and it works, until the session expires.
+- `s lock` instantly revokes the agent's ability to use any stored secret,
+  without changing the secrets themselves.
+
+Threat model caveat: the child process (curl, psql, etc.) still sees the real
+value; a malicious tool the agent invokes can still exfiltrate. `s` protects
+against leaks through the **agent's own I/O channels**, not against a
+compromised binary you hand the env to.
 
 Env overrides: `S_PASSPHRASE` (non-interactive passphrase), `S_TICKET_DIR`
 (override ticket location, e.g. for per-project caches or tests).
