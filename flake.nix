@@ -39,7 +39,7 @@
         };
 
         # Home Manager module
-        homeManagerModules.default = { config, lib, pkgs, ... }:
+        homeModules.default = { config, lib, pkgs, ... }:
           let
             cfg = config.programs.s;
           in
