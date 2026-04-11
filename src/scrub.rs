@@ -44,7 +44,7 @@ fn scrub_bytes(hay: &[u8], secrets: &[Vec<u8>]) -> Vec<u8> {
             }
         }
         if let Some(len) = matched {
-            out.extend_from_slice(b"***");
+            out.extend_from_slice(b"[REDACTED]");
             i += len;
         } else {
             out.push(hay[i]);

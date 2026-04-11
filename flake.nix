@@ -1,5 +1,5 @@
 {
-  description = "Secret Exec (s) — encrypted env store with a 7-day session";
+  description = "s — encrypted env store. your agent doesn't need to know your secrets.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -13,16 +13,12 @@
 
         s = pkgs.rustPlatform.buildRustPackage {
           pname = "s";
-          version = "0.4.0";
+          version = "0.6.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
 
-          # No C libraries needed; argon2/chacha20/sha2/etc. are pure Rust.
-          # Only `rpassword` touches the terminal via libc, which is always
-          # present. Nothing else to wire up.
-
           meta = with pkgs.lib; {
-            description = "Secret Exec — encrypted env store with a 7-day boot-clock-bound session";
+            description = "Encrypted env store — agents use secrets without seeing them";
             license = licenses.mit;
             platforms = platforms.linux ++ platforms.darwin;
             mainProgram = "s";
@@ -41,5 +37,42 @@
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [ cargo rustc rustfmt clippy ];
         };
+
+        # Home Manager module
+        homeManagerModules.default = { config, lib, pkgs, ... }:
+          let
+            cfg = config.programs.s;
+          in
+          {
+            options.programs.s = {
+              enable = lib.mkEnableOption "s — encrypted env store";
+
+              package = lib.mkOption {
+                type = lib.types.package;
+                default = s;
+                description = "The s package to use.";
+              };
+
+              passwordCommand = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                example = "security find-generic-password -s s-secrets -w";
+                description = ''
+                  Shell command to retrieve the encryption password.
+                  Set as S_KEY="!<command>" in the shell environment.
+                  If null, s will prompt on TTY.
+                '';
+              };
+            };
+
+            config = lib.mkIf cfg.enable {
+              home.packages = [ cfg.package ];
+
+              # Set S_KEY in the session environment
+              home.sessionVariables = lib.mkIf (cfg.passwordCommand != null) {
+                S_KEY = "!${cfg.passwordCommand}";
+              };
+            };
+          };
       });
 }
