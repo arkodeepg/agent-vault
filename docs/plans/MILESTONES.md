@@ -1,0 +1,89 @@
+# Agent Vault Milestones
+
+Date: 2026-06-04
+
+## Current Direction
+
+Build the first working version in Python because this machine can run and test Python now, while Rust/Cargo dependency resolution is blocked by crates.io DNS. The command surface remains `s`. The project is still inspired by `tobi/s`: https://github.com/tobi/s
+
+The implementation must not modify home-server services, firewall rules, system packages, or existing data. All work stays inside `/mnt/DATA/projects/agent-vault` until explicit deployment.
+
+## Milestone 1: Working Local CLI
+
+Status: complete
+
+Deliver:
+
+- `s help` and `s help <command>`.
+- Encrypted vault file storage.
+- `s init`, `s ls`, `s add`, `s update`, `s archive`, `s restore`.
+- `s run <KEY...> -- <command>` with env injection and output redaction.
+- `s cmd add`, `s cmd ls`, `s cmd run`.
+- `s status`, `s doctor`, `s audit`.
+- `s backup`.
+- Human-only `s get <NAME> --auth` blocked in agent mode.
+- Tests with fake API keys only.
+
+Verification completed:
+
+```bash
+/mnt/DATA/AIW2/venv/bin/python -m pytest /mnt/DATA/projects/agent-vault/tests
+/mnt/DATA/AIW2/venv/bin/python -m agent_vault.cli help
+S_VAULT_PATH=/tmp/agent-vault-smoke.senv /mnt/DATA/AIW2/venv/bin/python -m agent_vault.cli doctor
+```
+
+Commit when done:
+
+```text
+feat: add working local cli
+```
+
+## Milestone 2: Docker CLI Packaging
+
+Status: pending
+
+Deliver:
+
+- Dockerfile.
+- Docker compose example with `/data/vault.senv`.
+- Localhost-only defaults for future server mode.
+- Docker smoke test for `s help`, `s init`, `s ls`, and `s run`.
+
+Commit when done:
+
+```text
+feat: add docker cli packaging
+```
+
+## Milestone 3: Server and Web UI Plan Lock
+
+Status: pending
+
+Deliver:
+
+- Final API route plan.
+- Security checklist for no public exposure.
+- Decision on simple frontend stack.
+
+Commit when done:
+
+```text
+chore: lock server ui plan
+```
+
+## Milestone 4: Private API and Web UI
+
+Status: pending
+
+Deliver:
+
+- Private API bound to `127.0.0.1` by default.
+- Web UI for list, add, update, command registry, backup, audit.
+- Human confirmation flow for reveal and destructive actions.
+- No raw values in logs.
+
+Commit when done:
+
+```text
+feat: add private web ui
+```

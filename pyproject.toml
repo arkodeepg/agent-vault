@@ -1,0 +1,12 @@
+[project]
+name = "agent-vault"
+version = "0.1.0"
+description = "Single-user agent-safe secret and command vault"
+requires-python = ">=3.11"
+dependencies = ["cryptography>=41"]
+
+[project.scripts]
+s = "agent_vault.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

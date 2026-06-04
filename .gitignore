@@ -2,3 +2,8 @@
 /result
 /result-*
 .direnv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+backups/
+.tmp/
