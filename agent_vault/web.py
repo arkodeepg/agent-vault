@@ -16,12 +16,17 @@ HTML = """<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Agent Vault</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='12' y1='8' x2='52' y2='58'%3E%3Cstop stop-color='%2366d9a6'/%3E%3Cstop offset='1' stop-color='%232c7be5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='%230b0f14'/%3E%3Cpath d='M22 28v-7c0-6 4.7-11 10-11s10 5 10 11v7' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round'/%3E%3Crect x='16' y='26' width='32' height='27' rx='8' fill='url(%23g)'/%3E%3Ccircle cx='32' cy='39' r='4' fill='%230b0f14'/%3E%3Cpath d='M32 42v5' stroke='%230b0f14' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
   <style>
-    :root { color-scheme: dark; --bg:#0b0f14; --panel:#111821; --panel2:#0f151d; --text:#e6edf3; --muted:#8b98a5; --line:#233040; --accent:#66d9a6; }
+    :root { color-scheme: dark; --bg:#080c11; --panel:#111821; --panel2:#0d131b; --text:#e6edf3; --muted:#8b98a5; --line:#253246; --accent:#66d9a6; --accent2:#2c7be5; --shadow:0 18px 60px rgba(0,0,0,.35); }
     * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
-    header { display:flex; align-items:center; justify-content:space-between; padding:18px 22px; border-bottom:1px solid var(--line); background:#0d131a; position:sticky; top:0; z-index:2; }
+    body { margin:0; background:radial-gradient(circle at top left, rgba(102,217,166,.10), transparent 30%), var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+    header { display:flex; align-items:center; justify-content:space-between; padding:18px 22px; border-bottom:1px solid var(--line); background:rgba(13,19,26,.92); backdrop-filter: blur(14px); position:sticky; top:0; z-index:2; }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .logo { width:34px; height:34px; border-radius:10px; display:grid; place-items:center; background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 10px 30px rgba(44,123,229,.25); }
+    .logo svg { width:21px; height:21px; color:#071018; }
     h1 { margin:0; font-size:18px; letter-spacing:0; }
+    .subhead { color:var(--muted); font-size:12px; margin-top:1px; }
     main { display:grid; grid-template-columns: 360px 1fr; min-height:calc(100vh - 62px); }
     aside { border-right:1px solid var(--line); padding:16px; background:var(--panel2); }
     section { padding:18px; }
@@ -34,7 +39,7 @@ HTML = """<!doctype html>
     .row { display:flex; gap:8px; align-items:center; }
     .row > * { flex:1; }
     .toolbar { display:flex; gap:8px; align-items:center; }
-    .card { border:1px solid var(--line); border-radius:8px; background:var(--panel); padding:12px; margin-bottom:10px; }
+    .card { border:1px solid var(--line); border-radius:8px; background:linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,0)), var(--panel); padding:12px; margin-bottom:10px; box-shadow:var(--shadow); }
     .item { cursor:pointer; }
     .item.active { border-color:#2f8f63; }
     .name { font-weight:700; }
@@ -52,7 +57,10 @@ HTML = """<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Agent Vault</h1>
+  <div class="brand">
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/><rect x="5" y="10" width="14" height="10" rx="3" fill="currentColor"/><circle cx="12" cy="15" r="1.4" fill="#66d9a6"/></svg></div>
+    <div><h1>Agent Vault</h1><div class="subhead">Private command and secret vault</div></div>
+  </div>
   <div class="toolbar"><button id="copyDocs">Copy agent docs</button><button id="refresh">Refresh</button></div>
 </header>
 <main>

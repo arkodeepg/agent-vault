@@ -27,6 +27,8 @@ def test_html_is_dark_and_has_copy_docs():
     assert "color-scheme: dark" in HTML
     assert "Copy agent docs" in HTML
     assert "Search names, comments, tags" in HTML
+    assert 'rel="icon"' in HTML
+    assert "Private command and secret vault" in HTML
 
 
 def test_web_api_safe_routes(tmp_path, monkeypatch):
