@@ -149,7 +149,7 @@ chore: lock server ui plan
 
 ## Milestone 4: Private API and Web UI
 
-Status: pending
+Status: complete
 
 Deliver:
 
@@ -158,7 +158,16 @@ Deliver:
 - Human confirmation flow for reveal and destructive actions.
 - No raw values in logs.
 
-Commit when done:
+Verification completed:
+
+```bash
+/mnt/DATA/AIW2/venv/bin/python -m pytest /mnt/DATA/projects/agent-vault/tests
+PYTHON=/mnt/DATA/AIW2/venv/bin/python scripts/smoke_cli.sh
+scripts/smoke_docker.sh
+scripts/smoke_web_docker.sh
+```
+
+Commit:
 
 ```text
 feat: add private web ui

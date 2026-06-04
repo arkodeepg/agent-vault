@@ -36,6 +36,7 @@ Usage:
   s rollback NAME --to VERSION --auth
   s restore-backup FILE --auth
   s backup [--to DIR]
+  s web [--host 127.0.0.1] [--port 8787]
 """
 
 COMMAND_HELP = {
@@ -53,6 +54,7 @@ COMMAND_HELP = {
     "purge": "s purge NAME --auth\nHuman-only permanent removal including history.",
     "rollback": "s rollback NAME --to VERSION --auth\nHuman-only value rollback.",
     "restore-backup": "s restore-backup FILE --auth\nHuman-only restore to a .restored vault file by default.",
+    "web": "s web [--host 127.0.0.1] [--port 8787]\nRuns the Docker-oriented dark web UI. Defaults to localhost only.",
 }
 
 
@@ -285,6 +287,16 @@ def main(argv: list[str] | None = None) -> int:
             if not ns.auth:
                 raise core.VaultError("usage: s restore-backup FILE --auth")
             print(core.restore_backup(ns.file, replace=ns.replace))
+            return 0
+
+
+        if cmd == "web":
+            parser = argparse.ArgumentParser(prog="s web")
+            parser.add_argument("--host", default="127.0.0.1")
+            parser.add_argument("--port", type=int, default=8787)
+            ns = parser.parse_args(argv[1:])
+            from . import web
+            web.run(ns.host, ns.port)
             return 0
 
         if cmd == "backup":

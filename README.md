@@ -116,4 +116,4 @@ PYTHON=/mnt/DATA/AIW2/venv/bin/python scripts/smoke_cli.sh
 
 ## Development Plan
 
-See `docs/plans/2026-06-04-agent-vault-plan.md` and `docs/plans/MILESTONES.md`.
+See `docs/plans/2026-06-04-agent-vault-plan.md` and `docs/plans/MILESTONES.md`. Docker web UI notes live at `docs/WEB.md`.

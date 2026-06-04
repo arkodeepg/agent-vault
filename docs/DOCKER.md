@@ -41,3 +41,19 @@ docker run --rm -v "$PWD/data:/data" -e S_AGENT_MODE=1 -e S_KEY=test-password ag
 ```
 
 Agent mode blocks raw reveal and destructive operations.
+
+## Web UI
+
+The web UI is dark mode by default and is intended for Docker mode. It includes search and a Copy agent docs button.
+
+```bash
+S_KEY=test-password docker compose up --build
+```
+
+Open:
+
+```text
+http://127.0.0.1:8787
+```
+
+The compose file maps only `127.0.0.1:8787`, so it is not exposed on the LAN by default.
