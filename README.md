@@ -41,7 +41,7 @@ The vault path can be overridden:
 S_VAULT_PATH=/path/to/vault.senv s ls
 ```
 
-Secret values, command values, and value history are encrypted. Safe metadata such as names, comments, tags, and timestamps can be listed for agent discovery. Raw secret values must never appear in normal logs, list output, or agent context.
+Secret values, command values, and value history are encrypted. Safe metadata such as names, comments, tags, timestamps, and the last three characters of the value can be listed for agent discovery. Raw secret values must never appear in normal logs, list output, or agent context.
 
 ## Current CLI Command Surface
 
@@ -109,6 +109,10 @@ s backup --to /path/to/backups
 s restore-backup <BACKUP_FILE> --auth
 s password change --auth
 ```
+
+## CSV Export
+
+The web dashboard has an `Export CSV` button. It asks for the current master key before generating a CSV file with active items. The export uses real CSV quoting, so comments with commas, quotes, or newlines remain valid.
 
 ## Security Defaults
 

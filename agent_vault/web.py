@@ -69,7 +69,7 @@ HTML = """<!doctype html>
     <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/><rect x="5" y="10" width="14" height="10" rx="3" fill="currentColor"/><circle cx="12" cy="15" r="1.4" fill="#6f58ff"/></svg></div>
     <div><h1>Agent Vault</h1><div class="subhead">Private command and secret vault</div></div>
   </div>
-  <div class="toolbar"><button id="copyDocs">Copy agent docs</button><button id="refresh">Refresh</button></div>
+  <div class="toolbar"><button id="copyDocs">Copy agent docs</button><button id="refresh">Refresh</button><button id="exportCsv">Export CSV</button></div>
 </header>
 <main>
   <aside>
@@ -80,7 +80,7 @@ HTML = """<!doctype html>
     <div id="items" style="margin-top:14px"></div>
   </aside>
   <section>
-    <div class="tabs"><button data-tab="details" class="active">Details</button><button data-tab="add">Add</button><button data-tab="command">Command</button><button data-tab="master">Master key</button><button data-tab="audit">Audit</button></div>
+    <div class="tabs"><button data-tab="details" class="active">Details</button><button data-tab="add">Add</button><button data-tab="command">Command</button><button data-tab="master">Master key</button><button data-tab="audit">Activity Log</button></div>
     <div id="msg" class="status"></div>
     <div id="details" class="tab"></div>
     <div id="add" class="tab hidden card grid">
@@ -114,19 +114,21 @@ function tags(v){ return (v||'').split(',').map(x=>x.trim()).filter(Boolean); }
 async function api(path, opts={}){ const res = await fetch(path, {headers:{'content-type':'application/json'}, ...opts}); const text = await res.text(); let data; try { data = text ? JSON.parse(text) : {}; } catch { data = {text}; } if(!res.ok) throw new Error(data.error || text || res.statusText); return data; }
 function setMsg(m){ $('msg').textContent = m || ''; }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function renderItems(){ const q = $('search').value.toLowerCase(); const tf = $('typeFilter').value; const rows = state.items.filter(i => (!tf || i.type===tf) && JSON.stringify(i).toLowerCase().includes(q)); $('items').innerHTML = rows.map(i => `<div class="item ${state.selected===i.name?'active':''}" data-name="${esc(i.name)}"><span class="item-check"></span><div><div class="name">${esc(i.name)}</div><div class="meta"><span class="pill type">${esc(i.type)}</span>${i.archived?'<span class="pill archived">archived</span>':''}${(i.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join('')}</div><div class="meta">uses ${esc((i.uses||[]).join(',')||'-')}</div><div class="comment">${esc(i.comment||'')}</div></div></div>`).join('') || '<div class="empty">No items</div>'; document.querySelectorAll('.item').forEach(el => el.onclick = () => { state.selected = el.dataset.name; render(); }); }
+function hint(i){ return i.value_hint ? '...' + i.value_hint : '-'; }
+function renderItems(){ const q = $('search').value.toLowerCase(); const tf = $('typeFilter').value; const rows = state.items.filter(i => (!tf || i.type===tf) && JSON.stringify(i).toLowerCase().includes(q)); $('items').innerHTML = rows.map(i => `<div class="item ${state.selected===i.name?'active':''}" data-name="${esc(i.name)}"><span class="item-check"></span><div><div class="name">${esc(i.name)}</div><div class="meta"><span class="pill type">${esc(i.type)}</span>${i.archived?'<span class="pill archived">archived</span>':''}${(i.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join('')}</div><div class="meta">hint ${esc(hint(i))} · uses ${esc((i.uses||[]).join(',')||'-')}</div><div class="comment">${esc(i.comment||'')}</div></div></div>`).join('') || '<div class="empty">No items</div>'; document.querySelectorAll('.item').forEach(el => el.onclick = () => { state.selected = el.dataset.name; render(); }); }
 function selected(){ return state.items.find(i=>i.name===state.selected); }
-function renderDetails(){ const i = selected(); if(!i){ $('details').innerHTML = '<div class="card status">Select an item or add a new one.</div>'; return; } $('details').innerHTML = `<div class="card grid"><div><label>Name</label><input id="editName" value="${esc(i.name)}" /></div><div><label>Comment</label><textarea id="editComment">${esc(i.comment||'')}</textarea></div><div><label>Tags</label><input id="editTags" value="${esc((i.tags||[]).join(','))}" /></div><div><label>New value, optional</label><textarea id="editValue" placeholder="Leave empty to keep existing value"></textarea></div><div class="row"><button class="primary" id="saveEdit">Save</button><button id="archiveBtn">${i.archived?'Restore':'Archive'}</button>${i.type==='command'?'<button id="runCmd">Run command</button>':''}</div></div><pre id="runOut"></pre>`; $('saveEdit').onclick = saveEdit; $('archiveBtn').onclick = toggleArchive; if($('runCmd')) $('runCmd').onclick = runCommand; }
+function renderDetails(){ const i = selected(); if(!i){ $('details').innerHTML = '<div class="card status">Select an item or add a new one.</div>'; return; } $('details').innerHTML = `<div class="card grid"><div><label>Name</label><input id="editName" value="${esc(i.name)}" /></div><div><label>Value hint</label><input value="${esc(hint(i))}" readonly /></div><div><label>Comment</label><textarea id="editComment">${esc(i.comment||'')}</textarea></div><div><label>Tags</label><input id="editTags" value="${esc((i.tags||[]).join(','))}" /></div><div><label>New value, optional</label><textarea id="editValue" placeholder="Leave empty to keep existing value"></textarea></div><div class="row"><button class="primary" id="saveEdit">Save</button><button id="archiveBtn">${i.archived?'Restore':'Archive'}</button>${i.type==='command'?'<button id="runCmd">Run command</button>':''}</div></div><pre id="runOut"></pre>`; $('saveEdit').onclick = saveEdit; $('archiveBtn').onclick = toggleArchive; if($('runCmd')) $('runCmd').onclick = runCommand; }
 function renderMasterWarning(){ const active = state.status?.password_source?.default_password_active === true; $('masterWarn').classList.toggle('hidden', !active); }
 function render(){ renderItems(); renderDetails(); renderMasterWarning(); }
 async function load(){ const qs = state.all ? '?all=1' : ''; const [items,status] = await Promise.all([api('/api/items'+qs), api('/api/status')]); state.items = items; state.status = status; if(state.selected && !state.items.find(i=>i.name===state.selected)) state.selected=null; render(); }
 async function saveEdit(){ const i = selected(); const body = {comment:$('editComment').value, tags:tags($('editTags').value)}; if($('editName').value !== i.name) body.name = $('editName').value; if($('editValue').value) body.value = $('editValue').value; const r = await api('/api/items/'+encodeURIComponent(i.name), {method:'PATCH', body:JSON.stringify(body)}); state.selected = r.name; setMsg('Saved'); await load(); }
 async function toggleArchive(){ const i=selected(); await api('/api/items/'+encodeURIComponent(i.name)+'/'+(i.archived?'restore':'archive'), {method:'POST'}); setMsg(i.archived?'Restored':'Archived'); await load(); }
 async function runCommand(){ const i=selected(); const r=await api('/api/commands/'+encodeURIComponent(i.name)+'/run', {method:'POST'}); $('runOut').textContent = `exit ${r.code}\n${r.out}${r.err}`; }
+async function exportCsv(){ const password = prompt('Master key required for CSV export'); if(!password) return; const res = await fetch('/api/export.csv', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({password})}); const text = await res.text(); if(!res.ok){ let err = text; try { err = JSON.parse(text).error || text; } catch {} setMsg(err); return; } const blob = new Blob([text], {type:'text/csv;charset=utf-8'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'agent-vault-export.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); setMsg('CSV exported'); }
 $('addBtn').onclick = async()=>{ await api('/api/items',{method:'POST', body:JSON.stringify({name:$('addName').value,type:'secret',value:$('addValue').value,comment:$('addComment').value,tags:tags($('addTags').value)})}); setMsg('Added'); await load(); };
 $('cmdAdd').onclick = async()=>{ await api('/api/commands',{method:'POST', body:JSON.stringify({name:$('cmdName').value,command:$('cmdValue').value,uses:tags($('cmdUses').value),comment:$('cmdComment').value})}); setMsg('Command added'); await load(); };
 $('changeMaster').onclick = async()=>{ if($('newMaster').value !== $('repeatMaster').value){ setMsg('New master keys do not match'); return; } await api('/api/master-key',{method:'POST', body:JSON.stringify({current_password:$('currentMaster').value,new_password:$('newMaster').value})}); $('currentMaster').value=''; $('newMaster').value=''; $('repeatMaster').value=''; setMsg('Master key updated'); await load(); };
-$('refresh').onclick = load; $('search').oninput = renderItems; $('typeFilter').onchange = renderItems; $('showAll').onclick=async()=>{state.all=!state.all; $('showAll').textContent=state.all?'Active':'All'; await load();};
+$('refresh').onclick = load; $('exportCsv').onclick = exportCsv; $('search').oninput = renderItems; $('typeFilter').onchange = renderItems; $('showAll').onclick=async()=>{state.all=!state.all; $('showAll').textContent=state.all?'Active':'All'; await load();};
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden')); $(b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='audit') $('auditBox').textContent=JSON.stringify(await api('/api/audit'),null,2);});
 $('copyDocs').onclick = async()=>{ const t=await fetch('/api/agent-docs').then(r=>r.text()); await navigator.clipboard.writeText(t); setMsg('Agent documentation copied'); };
 load().catch(e=>setMsg(e.message));
@@ -170,6 +172,15 @@ class Handler(BaseHTTPRequestHandler):
         body = text.encode()
         self.send_response(200)
         self.send_header("content-type", "text/plain; charset=utf-8")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_csv(self, text: str) -> None:
+        body = text.encode()
+        self.send_response(200)
+        self.send_header("content-type", "text/csv; charset=utf-8")
+        self.send_header("content-disposition", 'attachment; filename="agent-vault-export.csv"')
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -227,6 +238,9 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.read_json()
                 core.rotate_password(body.get("current_password", ""), body.get("new_password", ""))
                 return json_response(self, 200, {"ok": True})
+            if path == "/api/export.csv":
+                body = self.read_json()
+                return self.send_csv(core.export_csv(body.get("password", "")))
             json_response(self, 404, {"error": "not found"})
         except Exception as exc:
             self.handle_error(exc)

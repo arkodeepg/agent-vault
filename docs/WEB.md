@@ -25,13 +25,15 @@ http://127.0.0.1:8787
 - Update names, comments, tags, and values.
 - Archive and restore items.
 - Add and run stored commands.
-- View audit metadata.
+- View activity metadata.
+- Export active items as CSV after entering the master key. CSV output uses proper quoting for commas, quotes, and newlines.
 - Copy agent documentation with the Copy agent docs button.
 
 ## Security Defaults
 
 - Compose binds to `127.0.0.1:8787`, not the LAN.
-- The web UI does not expose raw reveal, export, delete, purge, rollback, or restore-backup.
+- The web UI does not expose raw reveal, delete, purge, rollback, or restore-backup.
+- CSV export is master-key gated and refuses to run in agent mode.
 - Request bodies are not logged by default.
 - Vault data lives in the mounted `./data` directory as encrypted JSON.
 

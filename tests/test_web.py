@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import os
 import sys
@@ -30,6 +32,8 @@ def test_html_is_dark_and_has_copy_docs():
     assert 'rel="icon"' in HTML
     assert "Private command and secret vault" in HTML
     assert "Master key" in HTML
+    assert "Export CSV" in HTML
+    assert "Activity Log" in HTML
     assert "Please change it, for fuck's sake" in HTML
     assert "addType" not in HTML
 
@@ -48,10 +52,25 @@ def test_web_api_safe_routes(tmp_path, monkeypatch):
         assert "Agent Vault" in html
         doc = urllib.request.urlopen(base + "/api/agent-docs", timeout=5).read().decode()
         assert "S_AGENT_MODE=1" in doc
-        request(base + "/api/items", method="POST", payload={"name":"WEB_API_KEY","value":"test_web_fake_secret","comment":"Web fake","tags":["web"]})
+        request(base + "/api/items", method="POST", payload={"name":"WEB_API_KEY","value":"test_web_fake_secret","comment":"Web fake, with comma","tags":["web"]})
         rows = request(base + "/api/items")
         assert rows[0]["name"] == "WEB_API_KEY"
+        assert rows[0]["value_hint"] == "ret"
         assert "test_web_fake_secret" not in json.dumps(rows)
+        req = urllib.request.Request(
+            base + "/api/export.csv",
+            data=json.dumps({"password": "test-password"}).encode(),
+            method="POST",
+            headers={"content-type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as res:
+            assert "text/csv" in res.headers.get("content-type", "")
+            csv_text = res.read().decode()
+        parsed = list(csv.DictReader(io.StringIO(csv_text)))
+        assert parsed[0]["name"] == "WEB_API_KEY"
+        assert parsed[0]["value"] == "test_web_fake_secret"
+        assert parsed[0]["value_hint"] == "ret"
+        assert parsed[0]["comment"] == "Web fake, with comma"
         request(base + "/api/commands", method="POST", payload={"name":"WEB_PRINT","command": f"{sys.executable} -c 'import os; print(os.environ[\"WEB_API_KEY\"])'","uses":["WEB_API_KEY"],"comment":"Prints fake"})
         result = request(base + "/api/commands/WEB_PRINT/run", method="POST", payload={})
         assert result["out"].strip() == "[REDACTED]"

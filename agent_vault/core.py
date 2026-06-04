@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import base64
+import csv
 import datetime as dt
 import getpass
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -244,10 +246,15 @@ def validate_value(value: str) -> None:
         raise VaultError("value exceeds 1 MiB limit")
 
 
+def value_hint(value: str) -> str:
+    return value[-3:] if value else ""
+
+
 def item_public(name: str, item: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": name,
         "type": item.get("type", "secret"),
+        "value_hint": item.get("value_hint", ""),
         "comment": item.get("comment", ""),
         "tags": item.get("tags", []),
         "uses": item.get("uses", []),
@@ -301,6 +308,7 @@ def add_item(name: str, value: str, item_type: str = "secret", comment: str = ""
     data["items"][name] = {
         "type": item_type,
         "value": encrypt_text(value, password),
+        "value_hint": value_hint(value),
         "comment": comment,
         "tags": tags or [],
         "uses": uses or [],
@@ -334,6 +342,7 @@ def update_item(name: str, value: str | None = None, comment: str | None = None,
         item.setdefault("history", []).insert(0, {"value": item["value"], "ts": now_iso()})
         item["history"] = item["history"][:5]
         item["value"] = encrypt_text(value, password)
+        item["value_hint"] = value_hint(value)
     item["updated_at"] = now_iso()
     final_name = name
     if new_name:
@@ -455,6 +464,7 @@ def rotate_password(current_password: str, new_password: str) -> None:
     for item in data.get("items", {}).values():
         plain = decrypt_text(item["value"], current_password)
         item["value"] = encrypt_text(plain, new_password)
+        item["value_hint"] = value_hint(plain)
         history = []
         for entry in item.get("history", []):
             hist_plain = decrypt_text(entry["value"], current_password)
@@ -506,12 +516,14 @@ def import_env_text(text: str, comment: str = "Imported from env text") -> int:
             item.setdefault("history", []).insert(0, {"value": item["value"], "ts": ts})
             item["history"] = item["history"][:5]
             item["value"] = encrypt_text(value, password)
+            item["value_hint"] = value_hint(value)
             item["updated_at"] = ts
             item["archived"] = False
         else:
             data["items"][key] = {
                 "type": "secret",
                 "value": encrypt_text(value, password),
+                "value_hint": value_hint(value),
                 "comment": comment,
                 "tags": ["imported"],
                 "uses": [],
@@ -554,6 +566,50 @@ def export_values() -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+def verify_master_password(password: str) -> str:
+    require_not_agent("export secrets")
+    validate_value(password)
+    if password != get_password():
+        raise VaultError("master password did not match")
+    return password
+
+
+def export_csv(password: str) -> str:
+    password = verify_master_password(password)
+    data = load_vault()
+    out = io.StringIO()
+    fieldnames = [
+        "name",
+        "type",
+        "value",
+        "value_hint",
+        "comment",
+        "tags",
+        "uses",
+        "created_at",
+        "updated_at",
+    ]
+    writer = csv.DictWriter(out, fieldnames=fieldnames)
+    writer.writeheader()
+    for name, item in sorted(data["items"].items()):
+        if item.get("archived"):
+            continue
+        writer.writerow({
+            "name": name,
+            "type": item.get("type", "secret"),
+            "value": decrypt_text(item["value"], password),
+            "value_hint": item.get("value_hint", ""),
+            "comment": item.get("comment", ""),
+            "tags": ",".join(item.get("tags", [])),
+            "uses": ",".join(item.get("uses", [])),
+            "created_at": item.get("created_at", ""),
+            "updated_at": item.get("updated_at", ""),
+        })
+    audit(data, "export-csv")
+    save_vault(data)
+    return out.getvalue()
+
+
 def confirm_name(name: str, action: str) -> None:
     require_not_agent(action)
     require_tty(action)
@@ -588,12 +644,13 @@ def rollback_item(name: str, version: int) -> None:
     hist = item.get("history", [])
     if version < 1 or version > len(hist):
         raise VaultError(f"version {version} not found")
-    get_master_password()
+    password = get_master_password()
     confirm_name(name, "rollback")
     current = item["value"]
     restored = hist.pop(version - 1)
     hist.insert(0, {"value": current, "ts": now_iso()})
     item["value"] = restored["value"]
+    item["value_hint"] = value_hint(decrypt_text(item["value"], password))
     item["history"] = hist[:5]
     item["updated_at"] = now_iso()
     audit(data, "rollback", name)
