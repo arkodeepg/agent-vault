@@ -36,7 +36,7 @@ HTML = """<!doctype html>
     button:hover { border-color:#3b4e65; }
     button.primary { background:#123326; border-color:#1f7a50; color:#dffbed; }
     .danger { border-color:#7a3a34; background:#261412; color:#ffd8d2; }
-    .warn { color:#ffd8a8; border:1px solid #5b4420; background:#21190c; border-radius:8px; padding:10px; }
+    .alert { color:#ffe4e1; border:1px solid #8f2f2a; background:#2b1010; border-radius:8px; padding:10px; font-weight:700; }
     .grid { display:grid; gap:10px; }
     .row { display:flex; gap:8px; align-items:center; }
     .row > * { flex:1; }
@@ -90,7 +90,7 @@ HTML = """<!doctype html>
       <button class="primary" id="cmdAdd">Add command</button>
     </div>
     <div id="master" class="tab hidden card grid">
-      <div class="warn">Default master key is password. Please change it, for fuck's sake.</div>
+      <div id="masterWarn" class="alert hidden">Default master key is password. Please change it, for fuck's sake.</div>
       <div><label>Current master key</label><input id="currentMaster" type="password" autocomplete="current-password" /></div>
       <div><label>New master key</label><input id="newMaster" type="password" autocomplete="new-password" /></div>
       <div><label>Repeat new master key</label><input id="repeatMaster" type="password" autocomplete="new-password" /></div>
@@ -100,7 +100,7 @@ HTML = """<!doctype html>
   </section>
 </main>
 <script>
-let state = { items: [], selected: null, all: false };
+let state = { items: [], selected: null, all: false, status: null };
 const $ = id => document.getElementById(id);
 function tags(v){ return (v||'').split(',').map(x=>x.trim()).filter(Boolean); }
 async function api(path, opts={}){ const res = await fetch(path, {headers:{'content-type':'application/json'}, ...opts}); const text = await res.text(); let data; try { data = text ? JSON.parse(text) : {}; } catch { data = {text}; } if(!res.ok) throw new Error(data.error || text || res.statusText); return data; }
@@ -109,14 +109,15 @@ function esc(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 function renderItems(){ const q = $('search').value.toLowerCase(); const tf = $('typeFilter').value; const rows = state.items.filter(i => (!tf || i.type===tf) && JSON.stringify(i).toLowerCase().includes(q)); $('items').innerHTML = rows.map(i => `<div class="card item ${state.selected===i.name?'active':''}" data-name="${esc(i.name)}"><div class="name">${esc(i.name)}</div><div class="meta">${esc(i.type)}${i.archived?' archived':''} | uses ${esc((i.uses||[]).join(',')||'-')}</div><div>${(i.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join('')}</div><div class="comment">${esc(i.comment||'')}</div></div>`).join('') || '<div class="status">No items</div>'; document.querySelectorAll('.item').forEach(el => el.onclick = () => { state.selected = el.dataset.name; render(); }); }
 function selected(){ return state.items.find(i=>i.name===state.selected); }
 function renderDetails(){ const i = selected(); if(!i){ $('details').innerHTML = '<div class="card status">Select an item or add a new one.</div>'; return; } $('details').innerHTML = `<div class="card grid"><div><label>Name</label><input id="editName" value="${esc(i.name)}" /></div><div><label>Comment</label><textarea id="editComment">${esc(i.comment||'')}</textarea></div><div><label>Tags</label><input id="editTags" value="${esc((i.tags||[]).join(','))}" /></div><div><label>New value, optional</label><textarea id="editValue" placeholder="Leave empty to keep existing value"></textarea></div><div class="row"><button class="primary" id="saveEdit">Save</button><button id="archiveBtn">${i.archived?'Restore':'Archive'}</button>${i.type==='command'?'<button id="runCmd">Run command</button>':''}</div></div><pre id="runOut"></pre>`; $('saveEdit').onclick = saveEdit; $('archiveBtn').onclick = toggleArchive; if($('runCmd')) $('runCmd').onclick = runCommand; }
-function render(){ renderItems(); renderDetails(); }
-async function load(){ const qs = state.all ? '?all=1' : ''; state.items = await api('/api/items'+qs); if(state.selected && !state.items.find(i=>i.name===state.selected)) state.selected=null; render(); }
+function renderMasterWarning(){ const active = state.status?.password_source?.default_password_active === true; $('masterWarn').classList.toggle('hidden', !active); }
+function render(){ renderItems(); renderDetails(); renderMasterWarning(); }
+async function load(){ const qs = state.all ? '?all=1' : ''; const [items,status] = await Promise.all([api('/api/items'+qs), api('/api/status')]); state.items = items; state.status = status; if(state.selected && !state.items.find(i=>i.name===state.selected)) state.selected=null; render(); }
 async function saveEdit(){ const i = selected(); const body = {comment:$('editComment').value, tags:tags($('editTags').value)}; if($('editName').value !== i.name) body.name = $('editName').value; if($('editValue').value) body.value = $('editValue').value; const r = await api('/api/items/'+encodeURIComponent(i.name), {method:'PATCH', body:JSON.stringify(body)}); state.selected = r.name; setMsg('Saved'); await load(); }
 async function toggleArchive(){ const i=selected(); await api('/api/items/'+encodeURIComponent(i.name)+'/'+(i.archived?'restore':'archive'), {method:'POST'}); setMsg(i.archived?'Restored':'Archived'); await load(); }
 async function runCommand(){ const i=selected(); const r=await api('/api/commands/'+encodeURIComponent(i.name)+'/run', {method:'POST'}); $('runOut').textContent = `exit ${r.code}\n${r.out}${r.err}`; }
 $('addBtn').onclick = async()=>{ await api('/api/items',{method:'POST', body:JSON.stringify({name:$('addName').value,type:'secret',value:$('addValue').value,comment:$('addComment').value,tags:tags($('addTags').value)})}); setMsg('Added'); await load(); };
 $('cmdAdd').onclick = async()=>{ await api('/api/commands',{method:'POST', body:JSON.stringify({name:$('cmdName').value,command:$('cmdValue').value,uses:tags($('cmdUses').value),comment:$('cmdComment').value})}); setMsg('Command added'); await load(); };
-$('changeMaster').onclick = async()=>{ if($('newMaster').value !== $('repeatMaster').value){ setMsg('New master keys do not match'); return; } await api('/api/master-key',{method:'POST', body:JSON.stringify({current_password:$('currentMaster').value,new_password:$('newMaster').value})}); $('currentMaster').value=''; $('newMaster').value=''; $('repeatMaster').value=''; setMsg('Master key updated'); };
+$('changeMaster').onclick = async()=>{ if($('newMaster').value !== $('repeatMaster').value){ setMsg('New master keys do not match'); return; } await api('/api/master-key',{method:'POST', body:JSON.stringify({current_password:$('currentMaster').value,new_password:$('newMaster').value})}); $('currentMaster').value=''; $('newMaster').value=''; $('repeatMaster').value=''; setMsg('Master key updated'); await load(); };
 $('refresh').onclick = load; $('search').oninput = renderItems; $('typeFilter').onchange = renderItems; $('showAll').onclick=async()=>{state.all=!state.all; $('showAll').textContent=state.all?'Active':'All'; await load();};
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden')); $(b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='audit') $('auditBox').textContent=JSON.stringify(await api('/api/audit'),null,2);});
 $('copyDocs').onclick = async()=>{ const t=await fetch('/api/agent-docs').then(r=>r.text()); await navigator.clipboard.writeText(t); setMsg('Agent documentation copied'); };
