@@ -25,6 +25,12 @@ Usage:
   s status
   s doctor
   s audit [--json]
+  s import FILE|--stdin
+  s export --auth
+  s delete NAME --auth
+  s purge NAME --auth
+  s rollback NAME --to VERSION --auth
+  s restore-backup FILE --auth
   s backup [--to DIR]
 """
 
@@ -36,6 +42,12 @@ COMMAND_HELP = {
     "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd run NAME\nStores and runs command templates.",
     "backup": "s backup [--to DIR]\nCreates an encrypted backup without decrypting secret values.",
     "get": "s get NAME --auth\nHuman-only raw reveal. Refuses in agent mode and without TTY.",
+    "import": "s import FILE | s import --stdin\nImports KEY=VALUE lines without echoing values.",
+    "export": "s export --auth\nHuman-only export. Refuses in agent mode and without TTY.",
+    "delete": "s delete NAME --auth\nHuman-only destructive action. Agents should use archive instead.",
+    "purge": "s purge NAME --auth\nHuman-only permanent removal including history.",
+    "rollback": "s rollback NAME --to VERSION --auth\nHuman-only value rollback.",
+    "restore-backup": "s restore-backup FILE --auth\nHuman-only restore to a .restored vault file by default.",
 }
 
 
@@ -183,6 +195,57 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 for r in rows:
                     print(f"{r.get('ts')} {r.get('action')} {r.get('name')} ok={r.get('ok')} mode={r.get('mode')}")
+            return 0
+
+
+        if cmd == "import":
+            parser = argparse.ArgumentParser(prog="s import")
+            parser.add_argument("source", nargs="?")
+            parser.add_argument("--stdin", action="store_true")
+            ns = parser.parse_args(argv[1:])
+            if ns.stdin:
+                count = core.import_env_text(sys.stdin.read())
+            elif ns.source:
+                count = core.import_env_file(ns.source)
+            else:
+                raise core.VaultError("usage: s import FILE | s import --stdin")
+            print(f"imported {count} secret(s)")
+            return 0
+
+        if cmd == "export":
+            if "--auth" not in argv[1:]:
+                raise core.VaultError("usage: s export --auth")
+            sys.stdout.write(core.export_values())
+            return 0
+
+        if cmd in {"delete", "purge"}:
+            if len(argv) < 3 or argv[2] != "--auth":
+                raise core.VaultError(f"usage: s {cmd} NAME --auth")
+            core.delete_item(argv[1], purge_history=(cmd == "purge"))
+            print(f"{cmd}d {argv[1]}")
+            return 0
+
+        if cmd == "rollback":
+            parser = argparse.ArgumentParser(prog="s rollback")
+            parser.add_argument("name")
+            parser.add_argument("--to", type=int, required=True)
+            parser.add_argument("--auth", action="store_true")
+            ns = parser.parse_args(argv[1:])
+            if not ns.auth:
+                raise core.VaultError("usage: s rollback NAME --to VERSION --auth")
+            core.rollback_item(ns.name, ns.to)
+            print(f"rolled back {ns.name} to v{ns.to}")
+            return 0
+
+        if cmd == "restore-backup":
+            parser = argparse.ArgumentParser(prog="s restore-backup")
+            parser.add_argument("file")
+            parser.add_argument("--auth", action="store_true")
+            parser.add_argument("--replace", action="store_true")
+            ns = parser.parse_args(argv[1:])
+            if not ns.auth:
+                raise core.VaultError("usage: s restore-backup FILE --auth")
+            print(core.restore_backup(ns.file, replace=ns.replace))
             return 0
 
         if cmd == "backup":

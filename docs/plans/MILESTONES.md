@@ -38,6 +38,33 @@ Commit when done:
 feat: add working local cli
 ```
 
+
+## Milestone 1b: CLI Safety Hardening
+
+Status: complete
+
+Deliver:
+
+- Human-only command stubs and behavior for `s export --auth`, `s delete NAME --auth`, `s purge NAME --auth`, `s rollback NAME --to VERSION --auth`, and `s restore-backup FILE --auth`.
+- All destructive/raw-read commands refuse in `S_AGENT_MODE=1`.
+- All destructive/raw-read commands refuse without an interactive terminal.
+- `s import` for `.env` style values without echoing secrets.
+- Stronger `s doctor` checks for vault permissions and unsafe server status.
+- Tests for non-TTY refusal and agent-mode refusal using fake secrets only.
+
+Verification completed:
+
+```bash
+/mnt/DATA/AIW2/venv/bin/python -m pytest /mnt/DATA/projects/agent-vault/tests
+/mnt/DATA/AIW2/venv/bin/python -m agent_vault.cli help export
+```
+
+Commit:
+
+```text
+feat: harden cli safety commands
+```
+
 ## Milestone 2: Docker CLI Packaging
 
 Status: pending

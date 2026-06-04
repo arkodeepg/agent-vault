@@ -359,6 +359,148 @@ def run_command(name: str) -> Result:
     return Result(proc.returncode, redact(proc.stdout, list(values.values())), redact(proc.stderr, list(values.values())))
 
 
+
+def parse_env_lines(text: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            value = value[1:-1]
+        validate_name(key)
+        pairs.append((key, value))
+    return pairs
+
+
+def import_env_text(text: str, comment: str = "Imported from env text") -> int:
+    pairs = parse_env_lines(text)
+    if not pairs:
+        return 0
+    data = load_vault()
+    password = get_password()
+    ts = now_iso()
+    for key, value in pairs:
+        if key in data["items"]:
+            item = data["items"][key]
+            item.setdefault("history", []).insert(0, {"value": item["value"], "ts": ts})
+            item["history"] = item["history"][:5]
+            item["value"] = encrypt_text(value, password)
+            item["updated_at"] = ts
+            item["archived"] = False
+        else:
+            data["items"][key] = {
+                "type": "secret",
+                "value": encrypt_text(value, password),
+                "comment": comment,
+                "tags": ["imported"],
+                "uses": [],
+                "archived": False,
+                "created_at": ts,
+                "updated_at": ts,
+                "history": [],
+            }
+        audit(data, "import", key)
+    save_vault(data)
+    return len(pairs)
+
+
+def import_env_file(path: str) -> int:
+    return import_env_text(Path(path).read_text())
+
+
+def export_values() -> str:
+    require_not_agent("export secrets")
+    require_tty("export secrets")
+    get_master_password()
+    data = load_vault()
+    password = get_password("vault password: ")
+    lines = []
+    for name, item in sorted(data["items"].items()):
+        if item.get("archived") or item.get("type") != "secret":
+            continue
+        value = decrypt_text(item["value"], password)
+        escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+        lines.append(f'{name}="{escaped}"')
+    audit(data, "export")
+    save_vault(data)
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def confirm_name(name: str, action: str) -> None:
+    require_not_agent(action)
+    require_tty(action)
+    typed = input(f"type {name} to confirm {action}: ")
+    if typed != name:
+        raise VaultError("confirmation did not match")
+
+
+def delete_item(name: str, purge_history: bool = False) -> None:
+    data = load_vault()
+    if name not in data["items"]:
+        raise VaultError(f"{name} not found")
+    get_master_password()
+    confirm_name(name, "delete" if not purge_history else "purge")
+    if purge_history:
+        del data["items"][name]
+        audit(data, "purge", name)
+    else:
+        data["items"][name]["archived"] = True
+        data["items"][name]["deleted_at"] = now_iso()
+        audit(data, "delete", name)
+    save_vault(data)
+
+
+def rollback_item(name: str, version: int) -> None:
+    require_not_agent("rollback secret")
+    require_tty("rollback secret")
+    data = load_vault()
+    if name not in data["items"]:
+        raise VaultError(f"{name} not found")
+    item = data["items"][name]
+    hist = item.get("history", [])
+    if version < 1 or version > len(hist):
+        raise VaultError(f"version {version} not found")
+    get_master_password()
+    confirm_name(name, "rollback")
+    current = item["value"]
+    restored = hist.pop(version - 1)
+    hist.insert(0, {"value": current, "ts": now_iso()})
+    item["value"] = restored["value"]
+    item["history"] = hist[:5]
+    item["updated_at"] = now_iso()
+    audit(data, "rollback", name)
+    save_vault(data)
+
+
+def restore_backup(backup_file: str, replace: bool = False) -> str:
+    require_not_agent("restore backup")
+    require_tty("restore backup")
+    get_master_password()
+    src = Path(backup_file).expanduser()
+    if not src.exists():
+        raise VaultError(f"backup not found: {src}")
+    dest = vault_path() if replace else vault_path().with_suffix(".restored.senv")
+    with tarfile.open(src, "r:gz") as tar:
+        member = tar.getmember("vault.senv")
+        extracted = tar.extractfile(member)
+        if extracted is None:
+            raise VaultError("backup missing vault.senv")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(extracted.read())
+    try:
+        dest.chmod(0o600)
+    except PermissionError:
+        pass
+    return str(dest)
+
 def status() -> dict[str, Any]:
     path = vault_path()
     if not path.exists():

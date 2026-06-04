@@ -108,3 +108,60 @@ def test_status_and_doctor(tmp_path):
     proc = run_s(tmp_path, "doctor")
     assert proc.returncode == 0
     assert "network=not_started" in proc.stdout
+
+
+def test_import_stdin_redacts_from_list_and_run(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    env_text = "IMPORTED_API_KEY=test_imported_123456789_FAKE_ONLY\n"
+    proc = run_s(tmp_path, "import", "--stdin", input_text=env_text)
+    assert proc.returncode == 0, proc.stderr
+    proc = run_s(tmp_path, "ls", "--json")
+    assert "IMPORTED_API_KEY" in proc.stdout
+    assert "test_imported_123456789_FAKE_ONLY" not in proc.stdout
+    code = "import os; print(os.environ['IMPORTED_API_KEY'])"
+    proc = run_s(tmp_path, "run", "IMPORTED_API_KEY", "--", PY, "-c", code)
+    assert proc.returncode == 0, proc.stderr
+    assert "[REDACTED]" in proc.stdout
+    assert "test_imported_123456789_FAKE_ONLY" not in proc.stdout
+
+
+def test_human_only_commands_refuse_without_tty(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    for args in [
+        ("get", "TEST_API_KEY", "--auth"),
+        ("export", "--auth"),
+        ("delete", "TEST_API_KEY", "--auth"),
+        ("purge", "TEST_API_KEY", "--auth"),
+        ("rollback", "TEST_API_KEY", "--to", "1", "--auth"),
+    ]:
+        proc = run_s(tmp_path, *args)
+        assert proc.returncode == 1, args
+        assert "without an interactive terminal" in proc.stderr or "version 1 not found" in proc.stderr
+
+
+def test_agent_mode_blocks_human_only_commands(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    for args in [
+        ("get", "TEST_API_KEY", "--auth"),
+        ("export", "--auth"),
+        ("delete", "TEST_API_KEY", "--auth"),
+        ("purge", "TEST_API_KEY", "--auth"),
+        ("rollback", "TEST_API_KEY", "--to", "1", "--auth"),
+    ]:
+        proc = run_s(tmp_path, *args, extra_env={"S_AGENT_MODE": "1"})
+        assert proc.returncode == 1, args
+        assert "agent mode" in proc.stderr or "version 1 not found" in proc.stderr
+
+
+def test_restore_backup_refuses_without_tty(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    backup_dir = tmp_path / "backups"
+    proc = run_s(tmp_path, "backup", "--to", str(backup_dir))
+    assert proc.returncode == 0, proc.stderr
+    backup_file = proc.stdout.strip()
+    proc = run_s(tmp_path, "restore-backup", backup_file, "--auth")
+    assert proc.returncode == 1
+    assert "without an interactive terminal" in proc.stderr
