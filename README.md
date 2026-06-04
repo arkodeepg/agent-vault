@@ -30,9 +30,9 @@ S_VAULT_PATH=/path/to/vault.senv s ls
 
 Secret values, command values, and value history are encrypted. Safe metadata such as names, comments, tags, and timestamps can be listed for agent discovery. Raw secret values must never appear in normal logs, list output, or agent context.
 
-## Planned Command Surface
+## Current CLI Command Surface
 
-Safe agent-facing commands:
+Safe agent-facing commands currently implemented:
 
 ```bash
 s help
@@ -55,7 +55,7 @@ s audit
 s backup
 ```
 
-Human-only commands:
+Human-only commands currently implemented:
 
 ```bash
 s get <NAME> --auth
@@ -104,6 +104,12 @@ s restore-backup <BACKUP_FILE> --auth
 - Permanent delete is never available to agents.
 - Raw secret reveal always requires human presence.
 
+## Local Smoke Test
+
+```bash
+PYTHON=/mnt/DATA/AIW2/venv/bin/python scripts/smoke_cli.sh
+```
+
 ## Development Plan
 
-See `docs/plans/2026-06-04-agent-vault-plan.md`.
+See `docs/plans/2026-06-04-agent-vault-plan.md` and `docs/plans/MILESTONES.md`.
