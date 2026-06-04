@@ -61,3 +61,5 @@ http://127.0.0.1:8787
 ```
 
 The compose file maps only `127.0.0.1:8787`, so it is not exposed on the LAN by default.
+
+The dashboard asks for the master key before loading metadata or allowing updates.

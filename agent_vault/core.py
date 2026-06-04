@@ -566,8 +566,8 @@ def export_values() -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def verify_master_password(password: str) -> str:
-    require_not_agent("export secrets")
+def verify_master_password(password: str, action: str = "export secrets") -> str:
+    require_not_agent(action)
     validate_value(password)
     if password != get_password():
         raise VaultError("master password did not match")

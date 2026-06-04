@@ -20,6 +20,7 @@ http://127.0.0.1:8787
 
 ## Features
 
+- Unlock the dashboard with the current master key.
 - Search by name, comment, type, tag, or dependency.
 - Add secrets and notes.
 - Update names, comments, tags, and values.
@@ -32,9 +33,11 @@ http://127.0.0.1:8787
 ## Security Defaults
 
 - Compose binds to `127.0.0.1:8787`, not the LAN.
+- Metadata and mutation APIs require the dashboard unlock key.
 - The web UI does not expose raw reveal, delete, purge, rollback, or restore-backup.
 - CSV export is master-key gated and refuses to run in agent mode.
 - Request bodies are not logged by default.
+- Browser responses use `Cache-Control: no-store`.
 - Vault data lives in the mounted `./data` directory as encrypted JSON.
 
 Do not run this on `0.0.0.0` unless you intentionally put it behind trusted private networking such as Tailscale or an authenticated local reverse proxy.

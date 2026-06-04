@@ -16,9 +16,12 @@ from agent_vault import core
 from agent_vault.web import Handler, HTML
 
 
-def request(url, method="GET", payload=None):
+def request(url, method="GET", payload=None, key="test-password"):
     data = None if payload is None else json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data, method=method, headers={"content-type": "application/json"})
+    headers = {"content-type": "application/json"}
+    if key is not None:
+        headers["x-agent-vault-key"] = key
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     with urllib.request.urlopen(req, timeout=5) as res:
         body = res.read().decode()
         ctype = res.headers.get("content-type", "")
@@ -34,6 +37,8 @@ def test_html_is_dark_and_has_copy_docs():
     assert "Master key" in HTML
     assert "Export CSV" in HTML
     assert "Activity Log" in HTML
+    assert "Unlock Agent Vault" in HTML
+    assert "x-agent-vault-key" in HTML
     assert "grid-template-columns:minmax(440px, 50%) minmax(420px, 50%)" in HTML
     assert "items-list" in HTML
     assert "Please change it, for fuck's sake" in HTML
@@ -54,6 +59,11 @@ def test_web_api_safe_routes(tmp_path, monkeypatch):
         assert "Agent Vault" in html
         doc = urllib.request.urlopen(base + "/api/agent-docs", timeout=5).read().decode()
         assert "S_AGENT_MODE=1" in doc
+        try:
+            request(base + "/api/items", key=None)
+            raise AssertionError("unauthenticated items request succeeded")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
         request(base + "/api/items", method="POST", payload={"name":"WEB_API_KEY","value":"test_web_fake_secret","comment":"Web fake, with comma","tags":["web"]})
         rows = request(base + "/api/items")
         assert rows[0]["name"] == "WEB_API_KEY"
@@ -92,12 +102,12 @@ def test_web_master_key_rotation_reencrypts_existing_values(tmp_path, monkeypatc
     thread.start()
     base = f"http://127.0.0.1:{port}"
     try:
-        request(base + "/api/items", method="POST", payload={"name":"ROTATE_KEY","value":"rotate_fake_secret","comment":"Rotate fake"})
+        request(base + "/api/items", method="POST", payload={"name":"ROTATE_KEY","value":"rotate_fake_secret","comment":"Rotate fake"}, key="password")
         request(base + "/api/master-key", method="POST", payload={"current_password":"password","new_password":"new-test-password"})
         assert (tmp_path / "master.key").read_text().strip() == "new-test-password"
         code = f"{sys.executable} -c 'import os; print(os.environ[\"ROTATE_KEY\"])'"
-        request(base + "/api/commands", method="POST", payload={"name":"ROTATE_PRINT","command": code,"uses":["ROTATE_KEY"],"comment":"Prints rotated fake"})
-        result = request(base + "/api/commands/ROTATE_PRINT/run", method="POST", payload={})
+        request(base + "/api/commands", method="POST", payload={"name":"ROTATE_PRINT","command": code,"uses":["ROTATE_KEY"],"comment":"Prints rotated fake"}, key="new-test-password")
+        result = request(base + "/api/commands/ROTATE_PRINT/run", method="POST", payload={}, key="new-test-password")
         assert result["out"].strip() == "[REDACTED]"
     finally:
         server.shutdown()

@@ -37,6 +37,8 @@ HTML = """<!doctype html>
     button.primary { background:#5944df; border-color:#7563ff; color:#f4f1ff; }
     .danger { border-color:#7a3a34; background:#261412; color:#ffd8d2; }
     .alert { color:#ffe4e1; border:1px solid #8f2f2a; background:#2b1010; border-radius:8px; padding:10px; font-weight:700; }
+    .unlock { position:fixed; inset:0; z-index:5; display:grid; place-items:center; background:rgba(10,11,10,.88); padding:20px; }
+    .unlock .card { width:min(420px, 100%); }
     .grid { display:grid; gap:var(--space-sm); }
     .row { display:flex; gap:8px; align-items:center; }
     .row > * { flex:1; }
@@ -70,6 +72,13 @@ HTML = """<!doctype html>
   </style>
 </head>
 <body>
+<div id="unlock" class="unlock">
+  <div class="card grid">
+    <div><h1>Unlock Agent Vault</h1><div class="subhead">Enter the master key for this browser session.</div></div>
+    <input id="unlockKey" type="password" autocomplete="current-password" />
+    <button class="primary" id="unlockBtn">Unlock</button>
+  </div>
+</div>
 <header>
   <div class="brand">
     <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/><rect x="5" y="10" width="14" height="10" rx="3" fill="currentColor"/><circle cx="12" cy="15" r="1.4" fill="#6f58ff"/></svg></div>
@@ -119,7 +128,8 @@ HTML = """<!doctype html>
 let state = { items: [], selected: null, all: false, status: null };
 const $ = id => document.getElementById(id);
 function tags(v){ return (v||'').split(',').map(x=>x.trim()).filter(Boolean); }
-async function api(path, opts={}){ const res = await fetch(path, {headers:{'content-type':'application/json'}, ...opts}); const text = await res.text(); let data; try { data = text ? JSON.parse(text) : {}; } catch { data = {text}; } if(!res.ok) throw new Error(data.error || text || res.statusText); return data; }
+function webKey(){ return sessionStorage.getItem('agentVaultKey') || ''; }
+async function api(path, opts={}){ const headers = {'content-type':'application/json', 'x-agent-vault-key':webKey(), ...(opts.headers||{})}; const res = await fetch(path, {...opts, headers}); const text = await res.text(); let data; try { data = text ? JSON.parse(text) : {}; } catch { data = {text}; } if(!res.ok) throw new Error(data.error || text || res.statusText); return data; }
 function setMsg(m){ $('msg').textContent = m || ''; }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function hint(i){ return i.value_hint ? '...' + i.value_hint : '-'; }
@@ -129,6 +139,8 @@ function renderDetails(){ const i = selected(); if(!i){ $('details').innerHTML =
 function renderMasterWarning(){ const active = state.status?.password_source?.default_password_active === true; $('masterWarn').classList.toggle('hidden', !active); }
 function render(){ renderItems(); renderDetails(); renderMasterWarning(); }
 async function load(){ const qs = state.all ? '?all=1' : ''; const [items,status] = await Promise.all([api('/api/items'+qs), api('/api/status')]); state.items = items; state.status = status; if(state.selected && !state.items.find(i=>i.name===state.selected)) state.selected=null; render(); }
+async function unlockWithKey(key){ sessionStorage.setItem('agentVaultKey', key); try { await load(); $('unlock').classList.add('hidden'); $('unlockKey').value=''; setMsg(''); } catch(e){ sessionStorage.removeItem('agentVaultKey'); setMsg(e.message); } }
+async function unlock(){ const key = $('unlockKey').value; if(!key){ setMsg('Master key is required'); return; } await unlockWithKey(key); }
 async function saveEdit(){ const i = selected(); const body = {comment:$('editComment').value, tags:tags($('editTags').value)}; if($('editName').value !== i.name) body.name = $('editName').value; if($('editValue').value) body.value = $('editValue').value; const r = await api('/api/items/'+encodeURIComponent(i.name), {method:'PATCH', body:JSON.stringify(body)}); state.selected = r.name; setMsg('Saved'); await load(); }
 async function toggleArchive(){ const i=selected(); await api('/api/items/'+encodeURIComponent(i.name)+'/'+(i.archived?'restore':'archive'), {method:'POST'}); setMsg(i.archived?'Restored':'Archived'); await load(); }
 async function runCommand(){ const i=selected(); const r=await api('/api/commands/'+encodeURIComponent(i.name)+'/run', {method:'POST'}); $('runOut').textContent = `exit ${r.code}\n${r.out}${r.err}`; }
@@ -137,9 +149,10 @@ $('addBtn').onclick = async()=>{ await api('/api/items',{method:'POST', body:JSO
 $('cmdAdd').onclick = async()=>{ await api('/api/commands',{method:'POST', body:JSON.stringify({name:$('cmdName').value,command:$('cmdValue').value,uses:tags($('cmdUses').value),comment:$('cmdComment').value})}); setMsg('Command added'); await load(); };
 $('changeMaster').onclick = async()=>{ if($('newMaster').value !== $('repeatMaster').value){ setMsg('New master keys do not match'); return; } await api('/api/master-key',{method:'POST', body:JSON.stringify({current_password:$('currentMaster').value,new_password:$('newMaster').value})}); $('currentMaster').value=''; $('newMaster').value=''; $('repeatMaster').value=''; setMsg('Master key updated'); await load(); };
 $('refresh').onclick = load; $('exportCsv').onclick = exportCsv; $('search').oninput = renderItems; $('typeFilter').onchange = renderItems; $('showAll').onclick=async()=>{state.all=!state.all; $('showAll').textContent=state.all?'Active':'All'; await load();};
+$('unlockBtn').onclick = unlock; $('unlockKey').onkeydown = e => { if(e.key === 'Enter') unlock(); };
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden')); $(b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='audit') $('auditBox').textContent=JSON.stringify(await api('/api/audit'),null,2);});
 $('copyDocs').onclick = async()=>{ const t=await fetch('/api/agent-docs').then(r=>r.text()); await navigator.clipboard.writeText(t); setMsg('Agent documentation copied'); };
-load().catch(e=>setMsg(e.message));
+if(webKey()) unlockWithKey(webKey()).catch(e=>setMsg(e.message));
 </script>
 </body>
 </html>"""
@@ -149,9 +162,22 @@ def json_response(handler: BaseHTTPRequestHandler, status: int, payload: object)
     body = json.dumps(payload).encode()
     handler.send_response(status)
     handler.send_header("content-type", "application/json")
+    handler.send_header("cache-control", "no-store")
+    security_headers(handler)
     handler.send_header("content-length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def security_headers(handler: BaseHTTPRequestHandler) -> None:
+    handler.send_header("x-content-type-options", "nosniff")
+    handler.send_header("x-frame-options", "DENY")
+    handler.send_header("referrer-policy", "no-referrer")
+    handler.send_header(
+        "content-security-policy",
+        "default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; "
+        "img-src data: 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -168,10 +194,15 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(n).decode() if n else "{}"
         return json.loads(raw or "{}")
 
+    def require_web_auth(self) -> None:
+        core.verify_master_password(self.headers.get("x-agent-vault-key", ""), action="authenticate web request")
+
     def send_html(self) -> None:
         body = HTML.encode()
         self.send_response(200)
         self.send_header("content-type", "text/html; charset=utf-8")
+        self.send_header("cache-control", "no-store")
+        security_headers(self)
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -180,6 +211,8 @@ class Handler(BaseHTTPRequestHandler):
         body = text.encode()
         self.send_response(200)
         self.send_header("content-type", "text/plain; charset=utf-8")
+        self.send_header("cache-control", "no-store")
+        security_headers(self)
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -189,6 +222,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("content-type", "text/csv; charset=utf-8")
         self.send_header("content-disposition", 'attachment; filename="agent-vault-export.csv"')
+        self.send_header("cache-control", "no-store")
+        security_headers(self)
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -202,14 +237,17 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/":
                 return self.send_html()
             if parsed.path == "/api/items":
+                self.require_web_auth()
                 include_all = "all=1" in parsed.query
                 return json_response(self, 200, core.list_items(include_all=include_all))
             if parsed.path == "/api/audit":
+                self.require_web_auth()
                 return json_response(self, 200, core.audit_rows())
             if parsed.path == "/api/agent-docs":
                 doc = Path(__file__).resolve().parents[1] / "docs" / "AGENT_README.md"
                 return self.send_text(doc.read_text())
             if parsed.path == "/api/status":
+                self.require_web_auth()
                 return json_response(self, 200, core.status())
             json_response(self, 404, {"error": "not found"})
         except Exception as exc:
@@ -219,27 +257,33 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             if path == "/api/items":
+                self.require_web_auth()
                 body = self.read_json()
                 core.add_item(body.get("name", ""), body.get("value", ""), item_type=body.get("type", "secret"), comment=body.get("comment", ""), tags=body.get("tags", []))
                 return json_response(self, 200, {"ok": True})
             if path == "/api/commands":
+                self.require_web_auth()
                 body = self.read_json()
                 cmd = shlex.split(body.get("command", ""))
                 core.add_command(body.get("name", ""), cmd, comment=body.get("comment", ""), tags=body.get("tags", []), uses=body.get("uses", []))
                 return json_response(self, 200, {"ok": True})
             if path.startswith("/api/items/") and path.endswith("/archive"):
+                self.require_web_auth()
                 name = unquote(path.split("/")[3])
                 core.archive_item(name, True)
                 return json_response(self, 200, {"ok": True})
             if path.startswith("/api/items/") and path.endswith("/restore"):
+                self.require_web_auth()
                 name = unquote(path.split("/")[3])
                 core.archive_item(name, False)
                 return json_response(self, 200, {"ok": True})
             if path.startswith("/api/commands/") and path.endswith("/run"):
+                self.require_web_auth()
                 name = unquote(path.split("/")[3])
                 result = core.run_command(name)
                 return json_response(self, 200, {"code": result.code, "out": result.out, "err": result.err})
             if path == "/api/backup":
+                self.require_web_auth()
                 body = self.read_json()
                 return json_response(self, 200, {"path": core.backup(body.get("to"))})
             if path == "/api/master-key":
@@ -257,6 +301,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             if path.startswith("/api/items/"):
+                self.require_web_auth()
                 name = unquote(path.split("/")[3])
                 body = self.read_json()
                 final = core.update_item(name, value=body.get("value") or None, comment=body.get("comment"), new_name=body.get("name"), tags=body.get("tags"))

@@ -119,11 +119,13 @@ The web dashboard has an `Export CSV` button. It asks for the current master key
 - Single-user internal use only in v1.
 - Server binds to `127.0.0.1` by default.
 - No public exposure by default.
+- Web metadata and mutation APIs require the master key through the dashboard unlock flow.
 - Agent mode blocks reveal, export, delete, purge, rollback, and restore operations.
 - Permanent delete is never available to agents.
 - Raw secret reveal always requires human presence.
 - Dashboard master key rotation requires the current key and is blocked in agent mode.
 - The web UI has no multi-user auth in v1. Keep it private on localhost or Tailscale only.
+- Do not back up `master.key` with `vault.senv` unless you intentionally want the backup to be self-decrypting.
 
 ## Agent Documentation
 
