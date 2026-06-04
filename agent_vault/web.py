@@ -82,7 +82,7 @@ HTML = """<!doctype html>
 <header>
   <div class="brand">
     <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/><rect x="5" y="10" width="14" height="10" rx="3" fill="currentColor"/><circle cx="12" cy="15" r="1.4" fill="#6f58ff"/></svg></div>
-    <div><h1>Agent Vault</h1><div class="subhead">Private command and secret vault</div></div>
+    <div><h1>Agent Vault</h1><div class="subhead">Password manager for AI agents</div></div>
   </div>
   <div class="toolbar"><button id="copyDocs">Copy agent docs</button><button id="refresh">Refresh</button><button id="exportCsv">Export CSV</button></div>
 </header>
@@ -115,7 +115,7 @@ HTML = """<!doctype html>
       <button class="primary" id="cmdAdd">Add command</button>
     </div>
     <div id="master" class="tab hidden card grid">
-      <div id="masterWarn" class="alert hidden">Default master key is password. Please change it, for fuck's sake.</div>
+      <div id="masterWarn" class="alert hidden">Default master key is password. Change it immediately.</div>
       <div><label>Current master key</label><input id="currentMaster" type="password" autocomplete="current-password" /></div>
       <div><label>New master key</label><input id="newMaster" type="password" autocomplete="new-password" /></div>
       <div><label>Repeat new master key</label><input id="repeatMaster" type="password" autocomplete="new-password" /></div>

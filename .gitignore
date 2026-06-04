@@ -7,3 +7,11 @@ __pycache__/
 .pytest_cache/
 backups/
 .tmp/
+.env
+.senv
+*.senv
+data/
+master.json
+master.key
+vault.senv
+agent-vault-recovery-codes*.txt

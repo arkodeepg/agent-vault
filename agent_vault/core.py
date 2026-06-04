@@ -23,6 +23,8 @@ from typing import Any
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
+from . import __version__
+
 VERSION = 1
 DEFAULT_COMMENT_WORD_LIMIT = 180
 SAFE_TYPES = {"secret", "command", "note"}
@@ -942,10 +944,11 @@ def restore_backup(backup_file: str, replace: bool = False) -> str:
 def status() -> dict[str, Any]:
     path = vault_path()
     if not path.exists():
-        return {"vault_path": str(path), "exists": False}
+        return {"app_version": __version__, "vault_path": str(path), "exists": False}
     data = load_vault(path)
     items = data.get("items", {})
     return {
+        "app_version": __version__,
         "vault_path": str(path),
         "exists": True,
         "items": len(items),

@@ -52,6 +52,7 @@ s status
 s doctor
 s audit
 s history
+s version
 ```
 
 ## Discover Available Secrets and Commands
@@ -161,6 +162,7 @@ S_AGENT_MODE=1 s backup --to ./backups
 
 ```bash
 S_AGENT_MODE=1 s status
+S_AGENT_MODE=1 s version
 S_AGENT_MODE=1 s doctor
 S_AGENT_MODE=1 s help
 S_AGENT_MODE=1 s help run

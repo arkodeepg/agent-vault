@@ -4,7 +4,7 @@ The web UI is intended for Docker mode. It is dark mode by default and maps to l
 
 ## Default master key
 
-The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard.
+The default master key is `password`. Change it immediately with `s password change --auth` or the `Master key` tab in the dashboard.
 
 The dashboard updates `master.json`, which stores a verifier and wrapped vault key, not the raw master key.
 

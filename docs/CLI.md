@@ -14,7 +14,7 @@ Or use the wrapper:
 
 ## Default master key
 
-The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard.
+The default master key is `password`. Change it immediately with `s password change --auth` or the `Master key` tab in the dashboard.
 
 Agent Vault stores `master.json` beside the vault. It contains a verifier, a wrapped random vault key, and recovery-code metadata, not the raw master key.
 
@@ -56,7 +56,9 @@ s recovery use
 ## Core Flow
 
 ```bash
+s version
 s init
+s password change --auth
 printf 'fake-value' | s add TEST_API_KEY --stdin --comment "Fake key" --tags api,test
 s ls
 s update TEST_API_KEY --comment "Updated comment"

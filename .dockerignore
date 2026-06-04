@@ -13,3 +13,7 @@ backups/
 .tmp/
 *.senv
 .env
+master.json
+master.key
+vault.senv
+agent-vault-recovery-codes*.txt

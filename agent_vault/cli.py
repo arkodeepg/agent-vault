@@ -29,6 +29,7 @@ Usage:
   s status
   s doctor
   s audit [--json]
+  s version
   s password change --auth
   s migrate-key
   s recovery rotate --auth
@@ -50,6 +51,7 @@ COMMAND_HELP = {
     "run": "s run NAME [NAME...] -- command [args...]\nInjects secrets as env vars and redacts output.",
     "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd update NAME | s cmd run NAME\nStores and runs command templates.",
     "history": "s history NAME\nLists value history metadata only. Never prints previous values.",
+    "version": "s version\nPrints the Agent Vault app version.",
     "backup": "s backup [--to DIR]\nCreates an encrypted backup without decrypting secret values.",
     "password": "s password change --auth\nHuman-only master key rotation. Rewraps the vault key without storing the raw master key.",
     "migrate-key": "s migrate-key\nMigrates from plaintext key-file mode to wrapped vault-key mode and prints recovery codes once.",
@@ -108,6 +110,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         cmd = argv[0]
+
+        if cmd in {"version", "--version", "-V"}:
+            print(__version__)
+            return 0
 
         if cmd == "init":
             had_master_config = core.master_config_exists()

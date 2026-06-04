@@ -8,6 +8,39 @@ Agent Vault is a password manager for AI agents. Agents can discover safe metada
 - Docker/server mode: run a private container on the home server with a mounted encrypted vault and web UI.
 - Hybrid mode: use the same encrypted vault from both the CLI and Docker safely.
 
+## Installation And First Run
+
+Run from this checkout:
+
+```bash
+PYTHONPATH="$PWD" python3 -m agent_vault.cli version
+PYTHONPATH="$PWD" python3 -m agent_vault.cli init
+PYTHONPATH="$PWD" python3 -m agent_vault.cli password change --auth
+```
+
+Or use the wrapper:
+
+```bash
+bin/s version
+bin/s init
+bin/s password change --auth
+```
+
+Important setup default:
+
+- The default master key is `password`.
+- Change it immediately to a strong master key with `s password change --auth` or the dashboard `Master key` tab.
+- `s init` prints recovery codes once. Store them somewhere separate from `vault.senv`, `master.json`, and normal backups.
+- If you lose the master key and all recovery codes, the vault cannot be recovered.
+
+Docker first run:
+
+```bash
+docker compose up --build
+```
+
+Then open the dashboard, unlock with `password`, and change the master key immediately.
+
 ## Data Storage
 
 The default source of truth is two local files on disk:
@@ -21,7 +54,7 @@ master.json     password verifier, wrapped vault key, and recovery-code metadata
 
 ## Default Master Key
 
-The default master key is `password`. Please change it for fuck's sake.
+The default master key is `password`. Change it immediately during setup.
 
 Change it from the web dashboard under `Master key`, or from the CLI:
 
@@ -71,6 +104,7 @@ s status
 s doctor
 s audit
 s backup
+s version
 ```
 
 Human-only commands currently implemented:
@@ -147,7 +181,3 @@ Safe agent-facing usage docs live at `docs/AGENT_README.md`. The Docker web UI s
 ```bash
 PYTHON=/mnt/DATA/AIW2/venv/bin/python scripts/smoke_cli.sh
 ```
-
-## Development Plan
-
-See `docs/plans/2026-06-04-agent-vault-plan.md` and `docs/plans/MILESTONES.md`.

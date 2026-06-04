@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,6 +11,7 @@ FAKE = "test_sk_1234567890abcdef_FAKE_ONLY"
 
 sys.path.insert(0, str(ROOT))
 from agent_vault import core
+from agent_vault import __version__
 
 
 def run_s(tmp_path, *args, input_text=None, extra_env=None):
@@ -39,6 +41,14 @@ def test_help_exists(tmp_path):
     proc = run_s(tmp_path, "help", "ls")
     assert proc.returncode == 0
     assert "Never prints raw values" in proc.stdout
+    proc = run_s(tmp_path, "version")
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == __version__
+
+
+def test_package_version_matches_pyproject():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert project["project"]["version"] == __version__
 
 
 def test_add_list_update_archive_restore(tmp_path):
@@ -107,7 +117,9 @@ def test_status_and_doctor(tmp_path):
     assert run_s(tmp_path, "init").returncode == 0
     proc = run_s(tmp_path, "status")
     assert proc.returncode == 0
-    assert json.loads(proc.stdout)["exists"] is True
+    status = json.loads(proc.stdout)
+    assert status["exists"] is True
+    assert status["app_version"] == __version__
     proc = run_s(tmp_path, "doctor")
     assert proc.returncode == 0
     assert "network=not_started" in proc.stdout

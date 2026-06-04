@@ -6,7 +6,7 @@ CLI Docker mode exposes no ports. The web UI binds to `127.0.0.1` by default thr
 
 ## Default master key
 
-The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard.
+The default master key is `password`. Change it immediately with `s password change --auth` or the `Master key` tab in the dashboard.
 
 Docker stores:
 
@@ -29,6 +29,7 @@ The build is offline-friendly because required Python crypto packages are vendor
 
 ```bash
 docker run --rm agent-vault:local help
+docker run --rm agent-vault:local version
 ```
 
 ## Disposable Test Vault
@@ -72,6 +73,8 @@ http://127.0.0.1:8787
 The compose file maps only `127.0.0.1:8787`, so it is not exposed on the LAN by default.
 
 The dashboard asks for the master key before loading metadata or allowing updates.
+
+On first run, unlock with `password`, then change the master key immediately in the `Master key` tab.
 
 ## Migration
 
