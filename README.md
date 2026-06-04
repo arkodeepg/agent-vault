@@ -1,8 +1,6 @@
 # Agent Vault
 
-Agent Vault is a single-user internal secret and command vault for AI-assisted workflows.
-
-The goal is simple: agents should be able to discover and use secrets without seeing raw API keys, passwords, env values, or exported secret data.
+Agent Vault is a password manager for AI agents. Agents can discover safe metadata and run scripts with injected secrets, but they do not get to see raw API keys, passwords, env values, or exported secret data.
 
 ## Planned Modes
 
@@ -152,4 +150,4 @@ PYTHON=/mnt/DATA/AIW2/venv/bin/python scripts/smoke_cli.sh
 
 ## Development Plan
 
-Inspired by `s` from Tobi Lutke: https://github.com/tobi/s
+See `docs/plans/2026-06-04-agent-vault-plan.md` and `docs/plans/MILESTONES.md`.

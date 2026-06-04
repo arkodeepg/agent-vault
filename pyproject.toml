@@ -1,7 +1,7 @@
 [project]
 name = "agent-vault"
 version = "0.1.0"
-description = "Single-user agent-safe secret and command vault"
+description = "Password manager for AI agents that use secrets without seeing raw values"
 requires-python = ">=3.11"
 dependencies = ["cryptography>=46.0.7"]
 
