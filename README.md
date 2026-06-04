@@ -80,7 +80,7 @@ The vault path can be overridden:
 S_VAULT_PATH=/path/to/vault.senv s ls
 ```
 
-Secret values, command values, and value history are encrypted. Safe metadata such as names, comments, tags, timestamps, and the last three characters of the value can be listed for agent discovery. Raw secret values must never appear in normal logs, list output, or agent context.
+Secret values, command values, and value history are encrypted. Default `s ls` output shows only names and comments. Structured `s ls --json` output can include additional safe metadata for agent discovery. Raw secret values must never appear in normal logs, list output, or agent context.
 
 ## Current CLI Command Surface
 

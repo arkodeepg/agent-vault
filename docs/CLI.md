@@ -66,6 +66,8 @@ s run TEST_API_KEY -- python3 -c 'import os; print(os.environ["TEST_API_KEY"])'
 s backup --to ./backups
 ```
 
+Default `s ls` output shows only the item name and comment. Use `s ls --json` when an agent needs structured safe metadata.
+
 `run` injects the secret as an env var and redacts the value from stdout and stderr.
 
 ## Agent Mode

@@ -65,7 +65,12 @@ S_AGENT_MODE=1 s ls --json
 S_AGENT_MODE=1 s cmd ls
 ```
 
-These commands show safe metadata only:
+Default text output shows only:
+
+- name
+- comment
+
+Use `s ls --json` when structured discovery is needed. JSON output can include additional safe metadata:
 
 - name
 - type

@@ -72,11 +72,9 @@ def print_rows(rows: list[dict]) -> None:
         print("no items")
         return
     for r in rows:
-        tags = ",".join(r.get("tags", [])) or "-"
-        uses = ",".join(r.get("uses", [])) or "-"
-        hint = f"...{r.get('value_hint')}" if r.get("value_hint") else "-"
         archived = " archived" if r.get("archived") else ""
-        print(f"{r['name']:30} {r['type']:8} hint={hint:8} tags={tags:18} uses={uses:18} {r.get('comment','')}{archived}")
+        comment = r.get("comment", "")
+        print(f"{r['name']}\t{comment}{archived}")
 
 
 def split_double_dash(argv: list[str]) -> tuple[list[str], list[str]]:

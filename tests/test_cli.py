@@ -60,6 +60,11 @@ def test_add_list_update_archive_restore(tmp_path):
     assert rows[0]["name"] == "TEST_API_KEY"
     assert rows[0]["comment"] == "Fake test key"
     assert FAKE not in proc.stdout
+    proc = run_s(tmp_path, "ls")
+    assert proc.stdout.strip() == "TEST_API_KEY\tFake test key"
+    assert "hint=" not in proc.stdout
+    assert "tags=" not in proc.stdout
+    assert "secret" not in proc.stdout
     proc = run_s(tmp_path, "update", "TEST_API_KEY", "--comment", "Updated comment")
     assert proc.returncode == 0, proc.stderr
     proc = run_s(tmp_path, "archive", "TEST_API_KEY")
