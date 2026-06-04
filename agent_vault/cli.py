@@ -29,6 +29,7 @@ Usage:
   s status
   s doctor
   s audit [--json]
+  s password change --auth
   s import FILE|--stdin
   s export --auth
   s delete NAME --auth
@@ -47,6 +48,7 @@ COMMAND_HELP = {
     "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd update NAME | s cmd run NAME\nStores and runs command templates.",
     "history": "s history NAME\nLists value history metadata only. Never prints previous values.",
     "backup": "s backup [--to DIR]\nCreates an encrypted backup without decrypting secret values.",
+    "password": "s password change --auth\nHuman-only master key rotation. Re-encrypts all values and history, then updates the configured key file.",
     "get": "s get NAME --auth\nHuman-only raw reveal. Refuses in agent mode and without TTY.",
     "import": "s import FILE | s import --stdin\nImports KEY=VALUE lines without echoing values.",
     "export": "s export --auth\nHuman-only export. Refuses in agent mode and without TTY.",
@@ -238,6 +240,21 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{r.get('ts')} {r.get('action')} {r.get('name')} ok={r.get('ok')} mode={r.get('mode')}")
             return 0
 
+
+        if cmd == "password":
+            if len(argv) < 3 or argv[1] != "change" or argv[2] != "--auth":
+                raise core.VaultError("usage: s password change --auth")
+            core.require_not_agent("change master key")
+            core.require_tty("change master key")
+            import getpass
+            current = getpass.getpass("current master key: ")
+            new = getpass.getpass("new master key: ")
+            again = getpass.getpass("repeat new master key: ")
+            if new != again:
+                raise core.VaultError("new master key entries did not match")
+            core.rotate_password(current, new)
+            print("master key updated")
+            return 0
 
         if cmd == "import":
             parser = argparse.ArgumentParser(prog="s import")

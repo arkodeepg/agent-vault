@@ -12,6 +12,10 @@ Or use the wrapper:
 /mnt/DATA/projects/agent-vault/bin/s help
 ```
 
+## Default master key
+
+The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard. Docker should use `S_KEY_FILE=/data/master.key` so the dashboard can persist the update.
+
 ## Vault Location
 
 Set the vault path explicitly:

@@ -35,6 +35,8 @@ HTML = """<!doctype html>
     button { background:#172231; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:9px 11px; cursor:pointer; font:inherit; }
     button:hover { border-color:#3b4e65; }
     button.primary { background:#123326; border-color:#1f7a50; color:#dffbed; }
+    .danger { border-color:#7a3a34; background:#261412; color:#ffd8d2; }
+    .warn { color:#ffd8a8; border:1px solid #5b4420; background:#21190c; border-radius:8px; padding:10px; }
     .grid { display:grid; gap:10px; }
     .row { display:flex; gap:8px; align-items:center; }
     .row > * { flex:1; }
@@ -70,12 +72,11 @@ HTML = """<!doctype html>
     <div id="items" style="margin-top:14px"></div>
   </aside>
   <section>
-    <div class="tabs"><button data-tab="details" class="active">Details</button><button data-tab="add">Add</button><button data-tab="command">Command</button><button data-tab="audit">Audit</button></div>
+    <div class="tabs"><button data-tab="details" class="active">Details</button><button data-tab="add">Add</button><button data-tab="command">Command</button><button data-tab="master">Master key</button><button data-tab="audit">Audit</button></div>
     <div id="msg" class="status"></div>
     <div id="details" class="tab"></div>
     <div id="add" class="tab hidden card grid">
       <div><label>Name</label><input id="addName" /></div>
-      <div><label>Type</label><select id="addType"><option>secret</option><option>note</option></select></div>
       <div><label>Value</label><textarea id="addValue"></textarea></div>
       <div><label>Comment</label><textarea id="addComment"></textarea></div>
       <div><label>Tags, comma separated</label><input id="addTags" /></div>
@@ -87,6 +88,13 @@ HTML = """<!doctype html>
       <div><label>Uses, comma separated secret names</label><input id="cmdUses" /></div>
       <div><label>Comment</label><textarea id="cmdComment"></textarea></div>
       <button class="primary" id="cmdAdd">Add command</button>
+    </div>
+    <div id="master" class="tab hidden card grid">
+      <div class="warn">Default master key is password. Please change it, for fuck's sake.</div>
+      <div><label>Current master key</label><input id="currentMaster" type="password" autocomplete="current-password" /></div>
+      <div><label>New master key</label><input id="newMaster" type="password" autocomplete="new-password" /></div>
+      <div><label>Repeat new master key</label><input id="repeatMaster" type="password" autocomplete="new-password" /></div>
+      <button class="danger" id="changeMaster">Update master key</button>
     </div>
     <div id="audit" class="tab hidden"><pre id="auditBox"></pre></div>
   </section>
@@ -106,8 +114,9 @@ async function load(){ const qs = state.all ? '?all=1' : ''; state.items = await
 async function saveEdit(){ const i = selected(); const body = {comment:$('editComment').value, tags:tags($('editTags').value)}; if($('editName').value !== i.name) body.name = $('editName').value; if($('editValue').value) body.value = $('editValue').value; const r = await api('/api/items/'+encodeURIComponent(i.name), {method:'PATCH', body:JSON.stringify(body)}); state.selected = r.name; setMsg('Saved'); await load(); }
 async function toggleArchive(){ const i=selected(); await api('/api/items/'+encodeURIComponent(i.name)+'/'+(i.archived?'restore':'archive'), {method:'POST'}); setMsg(i.archived?'Restored':'Archived'); await load(); }
 async function runCommand(){ const i=selected(); const r=await api('/api/commands/'+encodeURIComponent(i.name)+'/run', {method:'POST'}); $('runOut').textContent = `exit ${r.code}\n${r.out}${r.err}`; }
-$('addBtn').onclick = async()=>{ await api('/api/items',{method:'POST', body:JSON.stringify({name:$('addName').value,type:$('addType').value,value:$('addValue').value || $('addComment').value,comment:$('addComment').value,tags:tags($('addTags').value)})}); setMsg('Added'); await load(); };
+$('addBtn').onclick = async()=>{ await api('/api/items',{method:'POST', body:JSON.stringify({name:$('addName').value,type:'secret',value:$('addValue').value,comment:$('addComment').value,tags:tags($('addTags').value)})}); setMsg('Added'); await load(); };
 $('cmdAdd').onclick = async()=>{ await api('/api/commands',{method:'POST', body:JSON.stringify({name:$('cmdName').value,command:$('cmdValue').value,uses:tags($('cmdUses').value),comment:$('cmdComment').value})}); setMsg('Command added'); await load(); };
+$('changeMaster').onclick = async()=>{ if($('newMaster').value !== $('repeatMaster').value){ setMsg('New master keys do not match'); return; } await api('/api/master-key',{method:'POST', body:JSON.stringify({current_password:$('currentMaster').value,new_password:$('newMaster').value})}); $('currentMaster').value=''; $('newMaster').value=''; $('repeatMaster').value=''; setMsg('Master key updated'); };
 $('refresh').onclick = load; $('search').oninput = renderItems; $('typeFilter').onchange = renderItems; $('showAll').onclick=async()=>{state.all=!state.all; $('showAll').textContent=state.all?'Active':'All'; await load();};
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden')); $(b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='audit') $('auditBox').textContent=JSON.stringify(await api('/api/audit'),null,2);});
 $('copyDocs').onclick = async()=>{ const t=await fetch('/api/agent-docs').then(r=>r.text()); await navigator.clipboard.writeText(t); setMsg('Agent documentation copied'); };
@@ -205,6 +214,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/backup":
                 body = self.read_json()
                 return json_response(self, 200, {"path": core.backup(body.get("to"))})
+            if path == "/api/master-key":
+                body = self.read_json()
+                core.rotate_password(body.get("current_password", ""), body.get("new_password", ""))
+                return json_response(self, 200, {"ok": True})
             json_response(self, 404, {"error": "not found"})
         except Exception as exc:
             self.handle_error(exc)

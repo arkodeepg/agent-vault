@@ -4,6 +4,10 @@ Docker mode packages the same `s` CLI and stores the encrypted vault at `/data/v
 
 CLI Docker mode exposes no ports. The future web UI must bind to `127.0.0.1` by default.
 
+## Default master key
+
+The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard. Docker should use `S_KEY_FILE=/data/master.key` so the dashboard can persist the update.
+
 ## Build
 
 ```bash
@@ -22,10 +26,10 @@ docker run --rm agent-vault:local help
 
 ```bash
 mkdir -p data
-docker run --rm -v "$PWD/data:/data" -e S_KEY=test-password agent-vault:local init
-printf 'test_sk_1234567890abcdef_FAKE_ONLY' | docker run --rm -i -v "$PWD/data:/data" -e S_KEY=test-password agent-vault:local add TEST_API_KEY --stdin --comment "Fake key"
-docker run --rm -v "$PWD/data:/data" -e S_KEY=test-password agent-vault:local ls
-docker run --rm -v "$PWD/data:/data" -e S_KEY=test-password agent-vault:local run TEST_API_KEY -- python -c "import os; print(os.environ['TEST_API_KEY'])"
+docker run --rm -v "$PWD/data:/data" -e S_KEY_FILE=/data/master.key agent-vault:local init
+printf 'test_sk_1234567890abcdef_FAKE_ONLY' | docker run --rm -i -v "$PWD/data:/data" -e S_KEY_FILE=/data/master.key agent-vault:local add TEST_API_KEY --stdin --comment "Fake key"
+docker run --rm -v "$PWD/data:/data" -e S_KEY_FILE=/data/master.key agent-vault:local ls
+docker run --rm -v "$PWD/data:/data" -e S_KEY_FILE=/data/master.key agent-vault:local run TEST_API_KEY -- python -c "import os; print(os.environ['TEST_API_KEY'])"
 ```
 
 Expected command output:
@@ -37,7 +41,7 @@ Expected command output:
 ## Agent Mode
 
 ```bash
-docker run --rm -v "$PWD/data:/data" -e S_AGENT_MODE=1 -e S_KEY=test-password agent-vault:local ls
+docker run --rm -v "$PWD/data:/data" -e S_AGENT_MODE=1 -e S_KEY_FILE=/data/master.key agent-vault:local ls
 ```
 
 Agent mode blocks raw reveal and destructive operations.
@@ -47,7 +51,7 @@ Agent mode blocks raw reveal and destructive operations.
 The web UI is dark mode by default and is intended for Docker mode. It includes search and a Copy agent docs button.
 
 ```bash
-S_KEY=test-password docker compose up --build
+docker compose up --build
 ```
 
 Open:

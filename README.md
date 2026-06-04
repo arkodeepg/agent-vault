@@ -14,6 +14,19 @@ The goal is simple: agents should be able to discover and use secrets without se
 
 The default source of truth is one encrypted vault file on disk.
 
+## Default Master Key
+
+The default master key is `password`. Please change it for fuck's sake.
+
+Change it from the web dashboard under `Master key`, or from the CLI:
+
+```bash
+s password change --auth
+```
+
+Changing the master key re-encrypts existing values and value history, then writes the new key to the configured password file. For Docker, use `S_KEY_FILE=/data/master.key` so the dashboard can update it.
+
+
 Recommended paths:
 
 ```text
@@ -64,9 +77,10 @@ s delete <NAME> --auth
 s purge <NAME> --auth
 s rollback <NAME> --to <VERSION> --auth
 s restore-backup <BACKUP_FILE> --auth
+s password change --auth
 ```
 
-Human-only commands require an interactive confirmation flow. The master password must not be passed as a visible command argument.
+Human-only commands require an interactive confirmation flow and the current master key. The master key must not be passed as a visible command argument.
 
 ## Python Usage
 
@@ -93,6 +107,7 @@ Planned commands:
 s backup
 s backup --to /path/to/backups
 s restore-backup <BACKUP_FILE> --auth
+s password change --auth
 ```
 
 ## Security Defaults
@@ -103,6 +118,8 @@ s restore-backup <BACKUP_FILE> --auth
 - Agent mode blocks reveal, export, delete, purge, rollback, and restore operations.
 - Permanent delete is never available to agents.
 - Raw secret reveal always requires human presence.
+- Dashboard master key rotation requires the current key and is blocked in agent mode.
+- The web UI has no multi-user auth in v1. Keep it private on localhost or Tailscale only.
 
 ## Agent Documentation
 

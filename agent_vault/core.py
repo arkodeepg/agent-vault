@@ -23,6 +23,8 @@ DEFAULT_COMMENT_WORD_LIMIT = 180
 SAFE_TYPES = {"secret", "command", "note"}
 HUMAN_ONLY = {"get", "export", "delete", "purge", "rollback", "restore-backup"}
 MAX_VALUE_BYTES = 1024 * 1024
+DEFAULT_PASSWORD = "password"
+DEFAULT_PASSWORD_FILE = "master.key"
 
 
 class VaultError(Exception):
@@ -62,6 +64,27 @@ def require_tty(action: str) -> None:
         raise VaultError(f"refusing to {action} without an interactive terminal")
 
 
+def configured_password_file() -> Path | None:
+    raw = os.environ.get("S_KEY_FILE")
+    if raw:
+        path = Path(raw).expanduser()
+        return path if path.exists() else None
+    default = vault_path().parent / DEFAULT_PASSWORD_FILE
+    if default.exists():
+        return default
+    return None
+
+
+def read_password_file(path: Path) -> str:
+    try:
+        pw = path.read_text().strip()
+    except OSError as exc:
+        raise VaultError(f"could not read password file: {path}") from exc
+    if not pw:
+        raise VaultError(f"password file is empty: {path}")
+    return pw
+
+
 def get_password(prompt: str = "vault password: ") -> str:
     val = os.environ.get("S_KEY")
     if val:
@@ -77,14 +100,53 @@ def get_password(prompt: str = "vault password: ") -> str:
                 raise VaultError("S_KEY command returned empty password")
             return pw
         return val
-    require_tty("read vault password")
-    return getpass.getpass(prompt)
+    key_file = configured_password_file()
+    if key_file:
+        return read_password_file(key_file)
+    return DEFAULT_PASSWORD
+
+
+def password_source_status() -> dict[str, Any]:
+    if os.environ.get("S_KEY"):
+        return {"source": "S_KEY", "writable": False, "default_password_active": False}
+    key_file = configured_password_file()
+    if key_file:
+        return {"source": "S_KEY_FILE", "path": str(key_file), "writable": True, "default_password_active": False}
+    raw = os.environ.get("S_KEY_FILE")
+    if raw:
+        return {"source": "S_KEY_FILE", "path": str(Path(raw).expanduser()), "writable": True, "default_password_active": True}
+    return {"source": "default", "writable": True, "default_password_active": True}
+
+
+def writable_password_file() -> Path:
+    if os.environ.get("S_KEY"):
+        raise VaultError("password is configured through S_KEY and cannot be changed from the dashboard. Use S_KEY_FILE instead.")
+    key_file = os.environ.get("S_KEY_FILE")
+    return Path(key_file).expanduser() if key_file else vault_path().parent / DEFAULT_PASSWORD_FILE
+
+
+def write_password_file(new_password: str) -> Path:
+    validate_value(new_password)
+    path = writable_password_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=str(path.parent), delete=False) as tmp:
+        tmp.write(new_password + "\n")
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+    try:
+        path.chmod(0o600)
+    except PermissionError:
+        pass
+    return path
 
 
 def get_master_password() -> str:
     require_not_agent("perform human-only action")
     require_tty("perform human-only action")
-    return getpass.getpass("master password: ")
+    pw = getpass.getpass("master password: ")
+    if pw != get_password():
+        raise VaultError("master password did not match")
+    return pw
 
 
 def derive_key(password: str, salt: bytes) -> bytes:
@@ -380,6 +442,32 @@ def run_command(name: str) -> Result:
 
 
 
+def rotate_password(current_password: str, new_password: str) -> None:
+    require_not_agent("change master key")
+    validate_value(current_password)
+    validate_value(new_password)
+    if current_password == new_password:
+        raise VaultError("new password must be different")
+    if current_password != get_password():
+        raise VaultError("current password did not match the configured master key")
+    data = load_vault()
+    writable_password_file()
+    for item in data.get("items", {}).values():
+        plain = decrypt_text(item["value"], current_password)
+        item["value"] = encrypt_text(plain, new_password)
+        history = []
+        for entry in item.get("history", []):
+            hist_plain = decrypt_text(entry["value"], current_password)
+            new_entry = dict(entry)
+            new_entry["value"] = encrypt_text(hist_plain, new_password)
+            history.append(new_entry)
+        item["history"] = history
+        item["updated_at"] = now_iso()
+    audit(data, "password-rotate")
+    save_vault(data)
+    write_password_file(new_password)
+
+
 def parse_env_lines(text: str) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -545,6 +633,7 @@ def status() -> dict[str, Any]:
         "items": len(items),
         "archived": sum(1 for item in items.values() if item.get("archived")),
         "agent_mode": is_agent_mode(),
+        "password_source": password_source_status(),
     }
 
 

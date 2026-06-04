@@ -27,6 +27,7 @@ s delete
 s purge
 s rollback
 s restore-backup
+s password change
 ```
 
 Allowed in agent mode:
