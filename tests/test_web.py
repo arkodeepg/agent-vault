@@ -34,6 +34,8 @@ def test_html_is_dark_and_has_copy_docs():
     assert "Master key" in HTML
     assert "Export CSV" in HTML
     assert "Activity Log" in HTML
+    assert "grid-template-columns:minmax(440px, 50%) minmax(420px, 50%)" in HTML
+    assert "items-list" in HTML
     assert "Please change it, for fuck's sake" in HTML
     assert "addType" not in HTML
 

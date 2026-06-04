@@ -18,7 +18,7 @@ HTML = """<!doctype html>
   <title>Agent Vault</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='12' y1='8' x2='52' y2='58'%3E%3Cstop stop-color='%2366d9a6'/%3E%3Cstop offset='1' stop-color='%232c7be5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='%230b0f14'/%3E%3Cpath d='M22 28v-7c0-6 4.7-11 10-11s10 5 10 11v7' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round'/%3E%3Crect x='16' y='26' width='32' height='27' rx='8' fill='url(%23g)'/%3E%3Ccircle cx='32' cy='39' r='4' fill='%230b0f14'/%3E%3Cpath d='M32 42v5' stroke='%230b0f14' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
   <style>
-    :root { color-scheme: dark; --bg:#141514; --panel:#1d1e1d; --panel2:#181918; --panel3:#222322; --text:#eee9e1; --muted:#96938d; --line:#30322f; --line2:#3c3e3a; --accent:#6f58ff; --accent2:#38a169; --warm:#b89563; --danger:#d56b61; --shadow:0 8px 24px rgba(0,0,0,.18); }
+    :root { color-scheme: dark; --bg:#141514; --panel:#1d1e1d; --panel2:#181918; --panel3:#222322; --text:#eee9e1; --muted:#96938d; --line:#30322f; --line2:#3c3e3a; --accent:#6f58ff; --accent2:#38a169; --warm:#b89563; --danger:#d56b61; --shadow:0 8px 24px rgba(0,0,0,.18); --space-2xs:4px; --space-xs:8px; --space-sm:12px; --space-md:16px; --space-lg:24px; }
     * { box-sizing: border-box; }
     body { margin:0; background:var(--bg); color:var(--text); font:13px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
     header { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid var(--line); background:#151615; position:sticky; top:0; z-index:2; }
@@ -27,40 +27,45 @@ HTML = """<!doctype html>
     .logo svg { width:21px; height:21px; color:#121312; }
     h1 { margin:0; font-size:15px; letter-spacing:0; }
     .subhead { color:var(--muted); font-size:11px; margin-top:1px; }
-    main { display:grid; grid-template-columns: 320px 1fr; min-height:calc(100vh - 55px); }
-    aside { border-right:1px solid var(--line); padding:14px; background:var(--panel2); }
-    section { padding:16px 18px; background:#191a19; }
+    main { display:grid; grid-template-columns:minmax(440px, 50%) minmax(420px, 50%); height:calc(100vh - 55px); min-height:620px; }
+    aside { border-right:1px solid var(--line); padding:var(--space-sm); background:var(--panel2); min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+    section { padding:var(--space-sm) var(--space-md); background:#191a19; min-width:0; overflow:auto; }
     input, textarea, select { width:100%; background:#151615; border:1px solid var(--line); color:var(--text); border-radius:5px; padding:8px 9px; font:inherit; }
-    textarea { min-height:74px; resize:vertical; }
+    textarea { min-height:70px; resize:vertical; }
     button { background:#20211f; color:var(--text); border:1px solid var(--line2); border-radius:5px; padding:8px 10px; cursor:pointer; font:inherit; }
     button:hover { border-color:#5a5c58; background:#262824; }
     button.primary { background:#5944df; border-color:#7563ff; color:#f4f1ff; }
     .danger { border-color:#7a3a34; background:#261412; color:#ffd8d2; }
     .alert { color:#ffe4e1; border:1px solid #8f2f2a; background:#2b1010; border-radius:8px; padding:10px; font-weight:700; }
-    .grid { display:grid; gap:10px; }
+    .grid { display:grid; gap:var(--space-sm); }
     .row { display:flex; gap:8px; align-items:center; }
     .row > * { flex:1; }
     .toolbar { display:flex; gap:8px; align-items:center; }
-    .card { border:1px solid var(--line); border-radius:7px; background:var(--panel); padding:12px; margin-bottom:10px; box-shadow:var(--shadow); }
-    .sidebar-title { margin:14px 0 8px; color:#76736e; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
-    .item { cursor:pointer; box-shadow:none; display:grid; grid-template-columns:16px 1fr; column-gap:8px; padding:8px; margin-bottom:0; border-radius:0; border-width:0 0 1px; }
+    .card { border:1px solid var(--line); border-radius:7px; background:var(--panel); padding:var(--space-sm); margin-bottom:var(--space-sm); box-shadow:var(--shadow); }
+    .sidebar-title { margin:var(--space-sm) 0 var(--space-xs); color:#76736e; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+    .index-controls { flex:0 0 auto; padding-bottom:var(--space-xs); border-bottom:1px solid var(--line); }
+    .items-list { flex:1 1 auto; min-height:0; overflow:auto; margin-top:var(--space-xs); border-top:1px solid #242623; }
+    .item { cursor:pointer; box-shadow:none; display:grid; grid-template-columns:14px minmax(150px, 1.1fr) minmax(170px, .9fr); column-gap:8px; align-items:start; padding:9px 8px; margin-bottom:0; border-radius:0; border-width:0 0 1px; }
     .item.active { border-color:var(--accent); background:#26243a; }
     .item-check { width:11px; height:11px; border:1px solid var(--line2); border-radius:2px; margin-top:3px; }
     .item.active .item-check { background:var(--accent); border-color:var(--accent); box-shadow:inset 0 0 0 2px #26243a; }
-    .name { font-weight:700; }
-    .meta { color:var(--muted); font-size:12px; margin-top:4px; }
-    .comment { margin-top:8px; color:#d4cfc7; }
-    .pill { display:inline-block; border:1px solid #3e443f; border-radius:999px; padding:1px 7px; margin:4px 4px 0 0; color:#bfe5cc; font-size:11px; background:#1d2b22; }
+    .name { font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .meta { color:var(--muted); font-size:11px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .comment { color:#d4cfc7; font-size:12px; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .pill { display:inline-block; border:1px solid #3e443f; border-radius:999px; padding:1px 6px; margin:3px 3px 0 0; color:#bfe5cc; font-size:10px; background:#1d2b22; }
     .pill.type { color:#d7d1ff; border-color:#403a6f; background:#26233f; }
     .pill.archived { color:#f0c6bf; border-color:#63403a; background:#33201d; }
     .status { color:var(--muted); white-space:pre-wrap; }
-    .tabs { display:flex; gap:6px; margin-bottom:14px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+    .tabs { display:flex; gap:6px; margin-bottom:var(--space-sm); border-bottom:1px solid var(--line); padding-bottom:8px; position:sticky; top:0; z-index:1; background:#191a19; }
     .tabs button.active { border-color:var(--accent); color:#d8d1ff; background:#25223c; }
     .hidden { display:none; }
     pre { background:#151615; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; max-height:300px; }
     label { color:var(--muted); font-size:11px; font-weight:650; }
     .empty { padding:14px 8px; color:var(--muted); }
-    @media (max-width: 860px) { main { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--line); } }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-sm); }
+    .form-grid .wide { grid-column:1 / -1; }
+    @media (max-width: 1020px) { main { grid-template-columns:1fr; height:auto; min-height:calc(100vh - 55px); } aside { max-height:46vh; border-right:0; border-bottom:1px solid var(--line); } section { overflow:visible; } }
+    @media (max-width: 640px) { header { align-items:flex-start; gap:10px; flex-direction:column; } main { min-height:calc(100vh - 98px); } .toolbar { flex-wrap:wrap; } .item { grid-template-columns:14px minmax(0, 1fr); } .comment { grid-column:2; margin-top:2px; } .form-grid { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
@@ -73,11 +78,13 @@ HTML = """<!doctype html>
 </header>
 <main>
   <aside>
-    <div class="sidebar-title">Vault Index</div>
-    <input id="search" placeholder="Search names, comments, tags" autocomplete="off" />
-    <div class="row" style="margin-top:10px"><select id="typeFilter"><option value="">All types</option><option>secret</option><option>command</option><option>note</option></select><button id="showAll">All</button></div>
+    <div class="index-controls">
+      <div class="sidebar-title">Vault Index</div>
+      <input id="search" placeholder="Search names, comments, tags" autocomplete="off" />
+      <div class="row" style="margin-top:8px"><select id="typeFilter"><option value="">All types</option><option>secret</option><option>command</option><option>note</option></select><button id="showAll">All</button></div>
+    </div>
     <div class="sidebar-title">Secrets & Commands</div>
-    <div id="items" style="margin-top:14px"></div>
+    <div id="items" class="items-list"></div>
   </aside>
   <section>
     <div class="tabs"><button data-tab="details" class="active">Details</button><button data-tab="add">Add</button><button data-tab="command">Command</button><button data-tab="master">Master key</button><button data-tab="audit">Activity Log</button></div>
@@ -115,9 +122,9 @@ async function api(path, opts={}){ const res = await fetch(path, {headers:{'cont
 function setMsg(m){ $('msg').textContent = m || ''; }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function hint(i){ return i.value_hint ? '...' + i.value_hint : '-'; }
-function renderItems(){ const q = $('search').value.toLowerCase(); const tf = $('typeFilter').value; const rows = state.items.filter(i => (!tf || i.type===tf) && JSON.stringify(i).toLowerCase().includes(q)); $('items').innerHTML = rows.map(i => `<div class="item ${state.selected===i.name?'active':''}" data-name="${esc(i.name)}"><span class="item-check"></span><div><div class="name">${esc(i.name)}</div><div class="meta"><span class="pill type">${esc(i.type)}</span>${i.archived?'<span class="pill archived">archived</span>':''}${(i.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join('')}</div><div class="meta">hint ${esc(hint(i))} · uses ${esc((i.uses||[]).join(',')||'-')}</div><div class="comment">${esc(i.comment||'')}</div></div></div>`).join('') || '<div class="empty">No items</div>'; document.querySelectorAll('.item').forEach(el => el.onclick = () => { state.selected = el.dataset.name; render(); }); }
+function renderItems(){ const q = $('search').value.toLowerCase(); const tf = $('typeFilter').value; const rows = state.items.filter(i => (!tf || i.type===tf) && JSON.stringify(i).toLowerCase().includes(q)); $('items').innerHTML = rows.map(i => `<div class="item ${state.selected===i.name?'active':''}" data-name="${esc(i.name)}"><span class="item-check"></span><div><div class="name" title="${esc(i.name)}">${esc(i.name)}</div><div class="meta"><span class="pill type">${esc(i.type)}</span>${i.archived?'<span class="pill archived">archived</span>':''}${(i.tags||[]).slice(0,3).map(t=>`<span class="pill">${esc(t)}</span>`).join('')}</div><div class="meta">hint ${esc(hint(i))} · uses ${esc((i.uses||[]).join(',')||'-')}</div></div><div class="comment">${esc(i.comment||'')}</div></div>`).join('') || '<div class="empty">No items</div>'; document.querySelectorAll('.item').forEach(el => el.onclick = () => { state.selected = el.dataset.name; render(); }); }
 function selected(){ return state.items.find(i=>i.name===state.selected); }
-function renderDetails(){ const i = selected(); if(!i){ $('details').innerHTML = '<div class="card status">Select an item or add a new one.</div>'; return; } $('details').innerHTML = `<div class="card grid"><div><label>Name</label><input id="editName" value="${esc(i.name)}" /></div><div><label>Value hint</label><input value="${esc(hint(i))}" readonly /></div><div><label>Comment</label><textarea id="editComment">${esc(i.comment||'')}</textarea></div><div><label>Tags</label><input id="editTags" value="${esc((i.tags||[]).join(','))}" /></div><div><label>New value, optional</label><textarea id="editValue" placeholder="Leave empty to keep existing value"></textarea></div><div class="row"><button class="primary" id="saveEdit">Save</button><button id="archiveBtn">${i.archived?'Restore':'Archive'}</button>${i.type==='command'?'<button id="runCmd">Run command</button>':''}</div></div><pre id="runOut"></pre>`; $('saveEdit').onclick = saveEdit; $('archiveBtn').onclick = toggleArchive; if($('runCmd')) $('runCmd').onclick = runCommand; }
+function renderDetails(){ const i = selected(); if(!i){ $('details').innerHTML = '<div class="card status">Select an item or add a new one.</div>'; return; } $('details').innerHTML = `<div class="card grid form-grid"><div><label>Name</label><input id="editName" value="${esc(i.name)}" /></div><div><label>Value hint</label><input value="${esc(hint(i))}" readonly /></div><div class="wide"><label>Comment</label><textarea id="editComment">${esc(i.comment||'')}</textarea></div><div><label>Tags</label><input id="editTags" value="${esc((i.tags||[]).join(','))}" /></div><div><label>New value, optional</label><textarea id="editValue" placeholder="Leave empty to keep existing value"></textarea></div><div class="row wide"><button class="primary" id="saveEdit">Save</button><button id="archiveBtn">${i.archived?'Restore':'Archive'}</button>${i.type==='command'?'<button id="runCmd">Run command</button>':''}</div></div><pre id="runOut"></pre>`; $('saveEdit').onclick = saveEdit; $('archiveBtn').onclick = toggleArchive; if($('runCmd')) $('runCmd').onclick = runCommand; }
 function renderMasterWarning(){ const active = state.status?.password_source?.default_password_active === true; $('masterWarn').classList.toggle('hidden', !active); }
 function render(){ renderItems(); renderDetails(); renderMasterWarning(); }
 async function load(){ const qs = state.all ? '?all=1' : ''; const [items,status] = await Promise.all([api('/api/items'+qs), api('/api/status')]); state.items = items; state.status = status; if(state.selected && !state.items.find(i=>i.name===state.selected)) state.selected=null; render(); }
