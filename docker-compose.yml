@@ -4,7 +4,6 @@ services:
     image: agent-vault:local
     environment:
       S_VAULT_PATH: /data/vault.senv
-      S_KEY_FILE: /data/master.key
     volumes:
       - ./data:/data
     ports:

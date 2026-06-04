@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
 FAKE = "test_sk_1234567890abcdef_FAKE_ONLY"
 
+sys.path.insert(0, str(ROOT))
+from agent_vault import core
+
 
 def run_s(tmp_path, *args, input_text=None, extra_env=None):
     env = os.environ.copy()
@@ -229,6 +232,33 @@ def test_command_update_archive_restore(tmp_path):
     assert proc.returncode == 0, proc.stderr
     proc = run_s(tmp_path, "cmd", "run", "PRINT_FAKE")
     assert proc.returncode == 0, proc.stderr
+
+
+def test_migrate_key_and_recover_master_password(tmp_path, monkeypatch):
+    monkeypatch.setenv("S_KEY", "legacy-test-password")
+    monkeypatch.setenv("S_VAULT_PATH", str(tmp_path / "vault.senv"))
+    core.init_vault()
+    (tmp_path / "master.json").unlink()
+    core.add_item("LEGACY_KEY", FAKE, comment="Legacy fake")
+
+    codes = core.migrate_master_config()
+    assert len(codes) == core.RECOVERY_CODE_COUNT
+    master_config_text = (tmp_path / "master.json").read_text()
+    assert "legacy-test-password" not in master_config_text
+    assert FAKE not in (tmp_path / "vault.senv").read_text()
+
+    with core.master_password_context("legacy-test-password"):
+        assert core.decrypt_many(["LEGACY_KEY"])["LEGACY_KEY"] == FAKE
+
+    core.recover_master_password(codes[0], "new-recovered-password")
+    with core.master_password_context("new-recovered-password"):
+        assert core.decrypt_many(["LEGACY_KEY"])["LEGACY_KEY"] == FAKE
+    with core.master_password_context("legacy-test-password"):
+        try:
+            core.decrypt_many(["LEGACY_KEY"])
+            raise AssertionError("old password still worked after recovery")
+        except core.VaultError:
+            pass
 
 
 def test_doctor_reports_permissions_and_parse(tmp_path):

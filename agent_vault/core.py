@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import contextvars
 import csv
 import datetime as dt
 import getpass
 import hashlib
+import hmac
 import io
 import json
 import os
@@ -27,6 +30,9 @@ HUMAN_ONLY = {"get", "export", "delete", "purge", "rollback", "restore-backup"}
 MAX_VALUE_BYTES = 1024 * 1024
 DEFAULT_PASSWORD = "password"
 DEFAULT_PASSWORD_FILE = "master.key"
+MASTER_CONFIG_FILE = "master.json"
+RECOVERY_CODE_COUNT = 8
+_MASTER_PASSWORD_OVERRIDE: contextvars.ContextVar[str | None] = contextvars.ContextVar("master_password_override", default=None)
 
 
 class VaultError(Exception):
@@ -77,6 +83,136 @@ def configured_password_file() -> Path | None:
     return None
 
 
+def master_config_path() -> Path:
+    if os.environ.get("S_MASTER_FILE"):
+        return Path(os.environ["S_MASTER_FILE"]).expanduser()
+    return vault_path().parent / MASTER_CONFIG_FILE
+
+
+def master_config_exists() -> bool:
+    return master_config_path().exists()
+
+
+def load_master_config() -> dict[str, Any]:
+    path = master_config_path()
+    if not path.exists():
+        raise VaultError(f"master config not found: {path}")
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise VaultError(f"master config is not valid JSON: {path}") from exc
+    if data.get("version") != 1:
+        raise VaultError(f"unsupported master config version: {data.get('version')}")
+    return data
+
+
+def save_master_config(data: dict[str, Any]) -> None:
+    path = master_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    with tempfile.NamedTemporaryFile("w", dir=str(path.parent), delete=False) as tmp:
+        tmp.write(payload)
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+    try:
+        path.chmod(0o600)
+    except PermissionError:
+        pass
+
+
+@contextlib.contextmanager
+def master_password_context(password: str):
+    token = _MASTER_PASSWORD_OVERRIDE.set(password)
+    try:
+        yield
+    finally:
+        _MASTER_PASSWORD_OVERRIDE.reset(token)
+
+
+def b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
+
+
+def unb64(data: str) -> bytes:
+    return base64.b64decode(data)
+
+
+def derive_scrypt_bytes(secret: str, salt: bytes, length: int = 32) -> bytes:
+    kdf = Scrypt(salt=salt, length=length, n=2**14, r=8, p=1)
+    return kdf.derive(secret.encode())
+
+
+def wrap_secret(secret: bytes, password: str) -> dict[str, str]:
+    validate_value(password)
+    salt = os.urandom(16)
+    nonce = os.urandom(12)
+    key = derive_scrypt_bytes(password, salt)
+    ct = AESGCM(key).encrypt(nonce, secret, None)
+    return {"kdf": "scrypt-v1", "salt": b64(salt), "nonce": b64(nonce), "ct": b64(ct)}
+
+
+def unwrap_secret(blob: dict[str, str], password: str) -> bytes:
+    validate_value(password)
+    if blob.get("kdf") != "scrypt-v1":
+        raise VaultError("unsupported key wrapper")
+    key = derive_scrypt_bytes(password, unb64(blob["salt"]))
+    try:
+        return AESGCM(key).decrypt(unb64(blob["nonce"]), unb64(blob["ct"]), None)
+    except Exception as exc:
+        raise VaultError("master password did not match") from exc
+
+
+def password_verifier(password: str, salt: bytes | None = None) -> dict[str, str]:
+    validate_value(password)
+    salt = salt or os.urandom(16)
+    return {"kdf": "scrypt-v1", "salt": b64(salt), "hash": b64(derive_scrypt_bytes(password, salt))}
+
+
+def verify_password(verifier: dict[str, str], password: str) -> None:
+    if verifier.get("kdf") != "scrypt-v1":
+        raise VaultError("unsupported password verifier")
+    actual = derive_scrypt_bytes(password, unb64(verifier["salt"]))
+    if not hmac.compare_digest(actual, unb64(verifier["hash"])):
+        raise VaultError("master password did not match")
+
+
+def format_recovery_code(raw: bytes | None = None) -> str:
+    raw = raw or os.urandom(12)
+    text = base64.b32encode(raw).decode().rstrip("=")
+    return "AV-" + "-".join(text[i:i + 4] for i in range(0, len(text), 4))
+
+
+def recovery_entry(code: str, vault_key: bytes) -> dict[str, Any]:
+    return {"created_at": now_iso(), "verifier": password_verifier(code), "wrapped_vault_key": wrap_secret(vault_key, code)}
+
+
+def generate_recovery_entries(vault_key: bytes, count: int = RECOVERY_CODE_COUNT) -> tuple[list[dict[str, Any]], list[str]]:
+    codes = [format_recovery_code() for _ in range(count)]
+    return [recovery_entry(code, vault_key) for code in codes], codes
+
+
+def make_master_config(master_password: str, vault_key: bytes | None = None, recovery_count: int = RECOVERY_CODE_COUNT) -> tuple[dict[str, Any], list[str]]:
+    vault_key = vault_key or os.urandom(32)
+    entries, codes = generate_recovery_entries(vault_key, recovery_count)
+    return {
+        "version": 1,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+        "default_password_active": master_password == DEFAULT_PASSWORD,
+        "verifier": password_verifier(master_password),
+        "wrapped_vault_key": wrap_secret(vault_key, master_password),
+        "recovery": entries,
+    }, codes
+
+
+def set_master_password_config(config: dict[str, Any], vault_key: bytes, new_password: str) -> dict[str, Any]:
+    config["updated_at"] = now_iso()
+    config["default_password_active"] = False
+    config["verifier"] = password_verifier(new_password)
+    config["wrapped_vault_key"] = wrap_secret(vault_key, new_password)
+    return config
+
+
 def read_password_file(path: Path) -> str:
     try:
         pw = path.read_text().strip()
@@ -87,7 +223,10 @@ def read_password_file(path: Path) -> str:
     return pw
 
 
-def get_password(prompt: str = "vault password: ") -> str:
+def get_master_secret(prompt: str = "master password: ") -> str:
+    override = _MASTER_PASSWORD_OVERRIDE.get()
+    if override is not None:
+        return override
     val = os.environ.get("S_KEY")
     if val:
         if val.startswith("!"):
@@ -108,7 +247,43 @@ def get_password(prompt: str = "vault password: ") -> str:
     return DEFAULT_PASSWORD
 
 
+def get_password(prompt: str = "vault password: ") -> str:
+    return get_master_secret(prompt)
+
+
+def get_vault_key(prompt: str = "master password: ") -> str:
+    if not master_config_exists():
+        return get_master_secret(prompt)
+    password = get_master_secret(prompt)
+    config = load_master_config()
+    try:
+        verify_password(config["verifier"], password)
+    except VaultError:
+        if os.environ.get("S_KEY") or configured_password_file() or _MASTER_PASSWORD_OVERRIDE.get() is not None or not sys.stdin.isatty():
+            raise
+        password = getpass.getpass(prompt)
+        verify_password(config["verifier"], password)
+    return b64(unwrap_secret(config["wrapped_vault_key"], password))
+
+
+def vault_key_from_master_password(password: str) -> str:
+    verify_master_password(password)
+    if not master_config_exists():
+        return password
+    config = load_master_config()
+    return b64(unwrap_secret(config["wrapped_vault_key"], password))
+
+
 def password_source_status() -> dict[str, Any]:
+    if master_config_exists():
+        config = load_master_config()
+        return {
+            "source": "master_config",
+            "path": str(master_config_path()),
+            "writable": True,
+            "default_password_active": bool(config.get("default_password_active", False)),
+            "recovery_codes": len(config.get("recovery", [])),
+        }
     if os.environ.get("S_KEY"):
         return {"source": "S_KEY", "writable": False, "default_password_active": False}
     key_file = configured_password_file()
@@ -122,7 +297,7 @@ def password_source_status() -> dict[str, Any]:
 
 def writable_password_file() -> Path:
     if os.environ.get("S_KEY"):
-        raise VaultError("password is configured through S_KEY and cannot be changed from the dashboard. Use S_KEY_FILE instead.")
+        raise VaultError("password is configured through S_KEY and cannot be changed from the dashboard. Unset S_KEY or migrate to master.json mode.")
     key_file = os.environ.get("S_KEY_FILE")
     return Path(key_file).expanduser() if key_file else vault_path().parent / DEFAULT_PASSWORD_FILE
 
@@ -146,14 +321,12 @@ def get_master_password() -> str:
     require_not_agent("perform human-only action")
     require_tty("perform human-only action")
     pw = getpass.getpass("master password: ")
-    if pw != get_password():
-        raise VaultError("master password did not match")
+    verify_master_password(pw, action="perform human-only action")
     return pw
 
 
 def derive_key(password: str, salt: bytes) -> bytes:
-    kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=1)
-    return kdf.derive(password.encode())
+    return derive_scrypt_bytes(password, salt)
 
 
 def encrypt_text(text: str, password: str) -> dict[str, str]:
@@ -277,6 +450,9 @@ def init_vault(force: bool = False) -> str:
     data = empty_vault()
     audit(data, "init")
     save_vault(data, path)
+    if not master_config_exists():
+        config, _codes = make_master_config(get_master_secret())
+        save_master_config(config)
     return str(path)
 
 
@@ -303,7 +479,7 @@ def add_item(name: str, value: str, item_type: str = "secret", comment: str = ""
     data = load_vault()
     if name in data["items"] and not data["items"][name].get("archived"):
         raise VaultError(f"{name} already exists. use `s update {name}`")
-    password = get_password()
+    password = get_vault_key()
     ts = now_iso()
     data["items"][name] = {
         "type": item_type,
@@ -338,7 +514,7 @@ def update_item(name: str, value: str | None = None, comment: str | None = None,
     if uses is not None:
         item["uses"] = uses
     if value is not None:
-        password = get_password()
+        password = get_vault_key()
         item.setdefault("history", []).insert(0, {"value": item["value"], "ts": now_iso()})
         item["history"] = item["history"][:5]
         item["value"] = encrypt_text(value, password)
@@ -377,7 +553,7 @@ def get_value(name: str) -> str:
     if name not in data["items"]:
         raise VaultError(f"{name} not found")
     get_master_password()
-    password = get_password("vault password: ")
+    password = get_vault_key("vault password: ")
     audit(data, "get", name)
     save_vault(data)
     return decrypt_text(data["items"][name]["value"], password)
@@ -385,7 +561,7 @@ def get_value(name: str) -> str:
 
 def decrypt_many(names: list[str]) -> dict[str, str]:
     data = load_vault()
-    password = get_password()
+    password = get_vault_key()
     values = {}
     for name in names:
         if name not in data["items"]:
@@ -441,7 +617,7 @@ def run_command(name: str) -> Result:
         raise VaultError(f"{name} is not a command")
     if item.get("archived"):
         raise VaultError(f"{name} is archived")
-    password = get_password()
+    password = get_vault_key()
     cmd = json.loads(decrypt_text(item["value"], password))
     values = decrypt_many(item.get("uses", []))
     env = os.environ.copy()
@@ -457,7 +633,13 @@ def rotate_password(current_password: str, new_password: str) -> None:
     validate_value(new_password)
     if current_password == new_password:
         raise VaultError("new password must be different")
-    if current_password != get_password():
+    if master_config_exists():
+        config = load_master_config()
+        verify_password(config["verifier"], current_password)
+        vault_key = unwrap_secret(config["wrapped_vault_key"], current_password)
+        save_master_config(set_master_password_config(config, vault_key, new_password))
+        return
+    if current_password != get_master_secret():
         raise VaultError("current password did not match the configured master key")
     data = load_vault()
     writable_password_file()
@@ -476,6 +658,83 @@ def rotate_password(current_password: str, new_password: str) -> None:
     audit(data, "password-rotate")
     save_vault(data)
     write_password_file(new_password)
+
+
+def migrate_master_config(recovery_count: int = RECOVERY_CODE_COUNT) -> list[str]:
+    require_not_agent("migrate master key")
+    if master_config_exists():
+        raise VaultError("master config already exists")
+    legacy_password = get_master_secret()
+    path = vault_path()
+    original_vault = path.read_bytes() if path.exists() else None
+    data = load_vault()
+    vault_key = os.urandom(32)
+    vault_key_text = b64(vault_key)
+    for item in data.get("items", {}).values():
+        plain = decrypt_text(item["value"], legacy_password)
+        item["value"] = encrypt_text(plain, vault_key_text)
+        item["value_hint"] = value_hint(plain)
+        history = []
+        for entry in item.get("history", []):
+            hist_plain = decrypt_text(entry["value"], legacy_password)
+            new_entry = dict(entry)
+            new_entry["value"] = encrypt_text(hist_plain, vault_key_text)
+            history.append(new_entry)
+        item["history"] = history
+        item["updated_at"] = now_iso()
+    config, codes = make_master_config(legacy_password, vault_key, recovery_count=recovery_count)
+    audit(data, "master-config-migrate")
+    try:
+        save_master_config(config)
+        save_vault(data)
+        key_file = configured_password_file()
+        if key_file and key_file.exists():
+            key_file.unlink()
+    except Exception:
+        if original_vault is not None:
+            path.write_bytes(original_vault)
+            try:
+                path.chmod(0o600)
+            except PermissionError:
+                pass
+        master_path = master_config_path()
+        if master_path.exists():
+            master_path.unlink()
+        raise
+    return codes
+
+
+def rotate_recovery_codes(master_password: str, count: int = RECOVERY_CODE_COUNT) -> list[str]:
+    require_not_agent("rotate recovery codes")
+    if not master_config_exists():
+        raise VaultError("master config not found. run migration first")
+    config = load_master_config()
+    verify_password(config["verifier"], master_password)
+    vault_key = unwrap_secret(config["wrapped_vault_key"], master_password)
+    entries, codes = generate_recovery_entries(vault_key, count)
+    config["recovery"] = entries
+    config["updated_at"] = now_iso()
+    save_master_config(config)
+    return codes
+
+
+def recover_master_password(recovery_code: str, new_password: str) -> None:
+    require_not_agent("recover master key")
+    validate_value(recovery_code)
+    validate_value(new_password)
+    if not master_config_exists():
+        raise VaultError("master config not found")
+    config = load_master_config()
+    for i, entry in enumerate(config.get("recovery", [])):
+        try:
+            verify_password(entry["verifier"], recovery_code)
+            vault_key = unwrap_secret(entry["wrapped_vault_key"], recovery_code)
+        except VaultError:
+            continue
+        del config["recovery"][i]
+        save_master_config(set_master_password_config(config, vault_key, new_password))
+        return
+    raise VaultError("recovery code did not match")
 
 
 def parse_env_lines(text: str) -> list[tuple[str, str]]:
@@ -508,7 +767,7 @@ def import_env_text(text: str, comment: str = "Imported from env text") -> int:
     if not pairs:
         return 0
     data = load_vault()
-    password = get_password()
+    password = get_vault_key()
     ts = now_iso()
     for key, value in pairs:
         if key in data["items"]:
@@ -553,7 +812,7 @@ def export_values() -> str:
     require_tty("export secrets")
     get_master_password()
     data = load_vault()
-    password = get_password("vault password: ")
+    password = get_vault_key("vault password: ")
     lines = []
     for name, item in sorted(data["items"].items()):
         if item.get("archived") or item.get("type") != "secret":
@@ -569,13 +828,15 @@ def export_values() -> str:
 def verify_master_password(password: str, action: str = "export secrets") -> str:
     require_not_agent(action)
     validate_value(password)
-    if password != get_password():
+    if master_config_exists():
+        verify_password(load_master_config()["verifier"], password)
+    elif password != get_master_secret():
         raise VaultError("master password did not match")
     return password
 
 
 def export_csv(password: str) -> str:
-    password = verify_master_password(password)
+    vault_key = vault_key_from_master_password(password)
     data = load_vault()
     out = io.StringIO()
     fieldnames = [
@@ -597,7 +858,7 @@ def export_csv(password: str) -> str:
         writer.writerow({
             "name": name,
             "type": item.get("type", "secret"),
-            "value": decrypt_text(item["value"], password),
+            "value": decrypt_text(item["value"], vault_key),
             "value_hint": item.get("value_hint", ""),
             "comment": item.get("comment", ""),
             "tags": ",".join(item.get("tags", [])),

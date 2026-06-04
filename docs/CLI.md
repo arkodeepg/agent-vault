@@ -14,7 +14,11 @@ Or use the wrapper:
 
 ## Default master key
 
-The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard. Docker should use `S_KEY_FILE=/data/master.key` so the dashboard can persist the update.
+The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard.
+
+Agent Vault stores `master.json` beside the vault. It contains a verifier, a wrapped random vault key, and recovery-code metadata, not the raw master key.
+
+`s init` prints recovery codes once. Store them separately. If the master key and all recovery codes are lost, the vault cannot be recovered.
 
 ## Vault Location
 
@@ -35,6 +39,19 @@ export S_KEY=test-password
 ```
 
 For real use, prefer an interactive prompt or a password command through `S_KEY=!command`. Do not put real passwords directly into shell history.
+
+Legacy key-file vaults can be migrated:
+
+```bash
+s migrate-key
+```
+
+Recovery commands:
+
+```bash
+s recovery rotate --auth
+s recovery use
+```
 
 ## Core Flow
 
@@ -69,6 +86,9 @@ s delete NAME --auth
 s purge NAME --auth
 s rollback NAME --to 1 --auth
 s restore-backup FILE --auth
+s password change --auth
+s recovery rotate --auth
+s recovery use
 ```
 
 Agents should use `archive` instead of delete.

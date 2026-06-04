@@ -147,7 +147,7 @@ async function runCommand(){ const i=selected(); const r=await api('/api/command
 async function exportCsv(){ const password = prompt('Master key required for CSV export'); if(!password) return; const res = await fetch('/api/export.csv', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({password})}); const text = await res.text(); if(!res.ok){ let err = text; try { err = JSON.parse(text).error || text; } catch {} setMsg(err); return; } const blob = new Blob([text], {type:'text/csv;charset=utf-8'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'agent-vault-export.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); setMsg('CSV exported'); }
 $('addBtn').onclick = async()=>{ await api('/api/items',{method:'POST', body:JSON.stringify({name:$('addName').value,type:'secret',value:$('addValue').value,comment:$('addComment').value,tags:tags($('addTags').value)})}); setMsg('Added'); await load(); };
 $('cmdAdd').onclick = async()=>{ await api('/api/commands',{method:'POST', body:JSON.stringify({name:$('cmdName').value,command:$('cmdValue').value,uses:tags($('cmdUses').value),comment:$('cmdComment').value})}); setMsg('Command added'); await load(); };
-$('changeMaster').onclick = async()=>{ if($('newMaster').value !== $('repeatMaster').value){ setMsg('New master keys do not match'); return; } await api('/api/master-key',{method:'POST', body:JSON.stringify({current_password:$('currentMaster').value,new_password:$('newMaster').value})}); $('currentMaster').value=''; $('newMaster').value=''; $('repeatMaster').value=''; setMsg('Master key updated'); await load(); };
+$('changeMaster').onclick = async()=>{ if($('newMaster').value !== $('repeatMaster').value){ setMsg('New master keys do not match'); return; } const nextKey = $('newMaster').value; await api('/api/master-key',{method:'POST', body:JSON.stringify({current_password:$('currentMaster').value,new_password:nextKey})}); sessionStorage.setItem('agentVaultKey', nextKey); $('currentMaster').value=''; $('newMaster').value=''; $('repeatMaster').value=''; setMsg('Master key updated'); await load(); };
 $('refresh').onclick = load; $('exportCsv').onclick = exportCsv; $('search').oninput = renderItems; $('typeFilter').onchange = renderItems; $('showAll').onclick=async()=>{state.all=!state.all; $('showAll').textContent=state.all?'Active':'All'; await load();};
 $('unlockBtn').onclick = unlock; $('unlockKey').onkeydown = e => { if(e.key === 'Enter') unlock(); };
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden')); $(b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='audit') $('auditBox').textContent=JSON.stringify(await api('/api/audit'),null,2);});
@@ -194,8 +194,10 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(n).decode() if n else "{}"
         return json.loads(raw or "{}")
 
-    def require_web_auth(self) -> None:
-        core.verify_master_password(self.headers.get("x-agent-vault-key", ""), action="authenticate web request")
+    def require_web_auth(self) -> str:
+        password = self.headers.get("x-agent-vault-key", "")
+        core.verify_master_password(password, action="authenticate web request")
+        return password
 
     def send_html(self) -> None:
         body = HTML.encode()
@@ -257,15 +259,17 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             if path == "/api/items":
-                self.require_web_auth()
+                password = self.require_web_auth()
                 body = self.read_json()
-                core.add_item(body.get("name", ""), body.get("value", ""), item_type=body.get("type", "secret"), comment=body.get("comment", ""), tags=body.get("tags", []))
+                with core.master_password_context(password):
+                    core.add_item(body.get("name", ""), body.get("value", ""), item_type=body.get("type", "secret"), comment=body.get("comment", ""), tags=body.get("tags", []))
                 return json_response(self, 200, {"ok": True})
             if path == "/api/commands":
-                self.require_web_auth()
+                password = self.require_web_auth()
                 body = self.read_json()
                 cmd = shlex.split(body.get("command", ""))
-                core.add_command(body.get("name", ""), cmd, comment=body.get("comment", ""), tags=body.get("tags", []), uses=body.get("uses", []))
+                with core.master_password_context(password):
+                    core.add_command(body.get("name", ""), cmd, comment=body.get("comment", ""), tags=body.get("tags", []), uses=body.get("uses", []))
                 return json_response(self, 200, {"ok": True})
             if path.startswith("/api/items/") and path.endswith("/archive"):
                 self.require_web_auth()
@@ -278,9 +282,10 @@ class Handler(BaseHTTPRequestHandler):
                 core.archive_item(name, False)
                 return json_response(self, 200, {"ok": True})
             if path.startswith("/api/commands/") and path.endswith("/run"):
-                self.require_web_auth()
+                password = self.require_web_auth()
                 name = unquote(path.split("/")[3])
-                result = core.run_command(name)
+                with core.master_password_context(password):
+                    result = core.run_command(name)
                 return json_response(self, 200, {"code": result.code, "out": result.out, "err": result.err})
             if path == "/api/backup":
                 self.require_web_auth()
@@ -301,10 +306,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             if path.startswith("/api/items/"):
-                self.require_web_auth()
+                password = self.require_web_auth()
                 name = unquote(path.split("/")[3])
                 body = self.read_json()
-                final = core.update_item(name, value=body.get("value") or None, comment=body.get("comment"), new_name=body.get("name"), tags=body.get("tags"))
+                with core.master_password_context(password):
+                    final = core.update_item(name, value=body.get("value") or None, comment=body.get("comment"), new_name=body.get("name"), tags=body.get("tags"))
                 return json_response(self, 200, {"ok": True, "name": final})
             json_response(self, 404, {"error": "not found"})
         except Exception as exc:

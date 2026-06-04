@@ -1,6 +1,6 @@
 # Agent Vault
 
-Agent Vault is a single-user internal secret and command vault for AI-assisted workflows. It is inspired by `s` from Tobi Lutke: https://github.com/tobi/s
+Agent Vault is a single-user internal secret and command vault for AI-assisted workflows.
 
 The goal is simple: agents should be able to discover and use secrets without seeing raw API keys, passwords, env values, or exported secret data.
 
@@ -12,7 +12,14 @@ The goal is simple: agents should be able to discover and use secrets without se
 
 ## Data Storage
 
-The default source of truth is one encrypted vault file on disk.
+The default source of truth is two local files on disk:
+
+```text
+vault.senv      encrypted vault data
+master.json     password verifier, wrapped vault key, and recovery-code metadata
+```
+
+`master.json` does not store the raw master key. The master key unlocks a random vault encryption key, and that vault key decrypts `vault.senv`.
 
 ## Default Master Key
 
@@ -24,8 +31,9 @@ Change it from the web dashboard under `Master key`, or from the CLI:
 s password change --auth
 ```
 
-Changing the master key re-encrypts existing values and value history, then writes the new key to the configured password file. For Docker, use `S_KEY_FILE=/data/master.key` so the dashboard can update it.
+Changing the master key rewraps the vault key. It does not write the raw master key to disk.
 
+During first setup and during `s migrate-key`, Agent Vault prints recovery codes once. Store them somewhere separate from the vault. If you forget the master key and lose all recovery codes, the vault is intentionally unrecoverable.
 
 Recommended paths:
 
@@ -61,7 +69,6 @@ s cmd ls
 s cmd add <COMMAND_NAME> --uses API_KEY --comment "..." -- <command>
 s cmd update <COMMAND_NAME>
 s cmd run <COMMAND_NAME>
-s scan
 s status
 s doctor
 s audit
@@ -78,6 +85,9 @@ s purge <NAME> --auth
 s rollback <NAME> --to <VERSION> --auth
 s restore-backup <BACKUP_FILE> --auth
 s password change --auth
+s migrate-key
+s recovery rotate --auth
+s recovery use
 ```
 
 Human-only commands require an interactive confirmation flow and the current master key. The master key must not be passed as a visible command argument.
@@ -101,14 +111,15 @@ If a script accidentally prints the key, Agent Vault should redact it from stdou
 
 Backups copy encrypted vault data only. They must not decrypt secret values.
 
-Planned commands:
+Commands:
 
 ```bash
 s backup
 s backup --to /path/to/backups
 s restore-backup <BACKUP_FILE> --auth
-s password change --auth
 ```
+
+Back up `vault.senv` and `master.json` together. Store recovery codes separately from both files.
 
 ## CSV Export
 
@@ -125,7 +136,9 @@ The web dashboard has an `Export CSV` button. It asks for the current master key
 - Raw secret reveal always requires human presence.
 - Dashboard master key rotation requires the current key and is blocked in agent mode.
 - The web UI has no multi-user auth in v1. Keep it private on localhost or Tailscale only.
-- Do not back up `master.key` with `vault.senv` unless you intentionally want the backup to be self-decrypting.
+- Do not store recovery codes beside the vault backup.
+
+More detail: [Security Model](docs/SECURITY.md), [CLI Usage](docs/CLI.md), [Docker Usage](docs/DOCKER.md), [Web UI](docs/WEB.md), [Agent README](docs/AGENT_README.md).
 
 ## Agent Documentation
 
@@ -139,4 +152,4 @@ PYTHON=/mnt/DATA/AIW2/venv/bin/python scripts/smoke_cli.sh
 
 ## Development Plan
 
-See `docs/plans/2026-06-04-agent-vault-plan.md` and `docs/plans/MILESTONES.md`. Docker web UI notes live at `docs/WEB.md`.
+Inspired by `s` from Tobi Lutke: https://github.com/tobi/s

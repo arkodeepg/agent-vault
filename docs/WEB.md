@@ -4,12 +4,14 @@ The web UI is intended for Docker mode. It is dark mode by default and maps to l
 
 ## Default master key
 
-The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard. Docker should use `S_KEY_FILE=/data/master.key` so the dashboard can persist the update.
+The default master key is `password`. Please change it for fuck's sake. Use `s password change --auth` for CLI rotation or the `Master key` tab in the dashboard.
+
+The dashboard updates `master.json`, which stores a verifier and wrapped vault key, not the raw master key.
 
 ## Start
 
 ```bash
-S_KEY='use-a-real-local-password-command-or-secret' docker compose up --build
+docker compose up --build
 ```
 
 Open:
@@ -38,6 +40,7 @@ http://127.0.0.1:8787
 - CSV export is master-key gated and refuses to run in agent mode.
 - Request bodies are not logged by default.
 - Browser responses use `Cache-Control: no-store`.
-- Vault data lives in the mounted `./data` directory as encrypted JSON.
+- Vault data lives in the mounted `./data` directory as encrypted JSON plus `master.json`.
+- If the master key and all recovery codes are lost, the vault cannot be recovered.
 
 Do not run this on `0.0.0.0` unless you intentionally put it behind trusted private networking such as Tailscale or an authenticated local reverse proxy.

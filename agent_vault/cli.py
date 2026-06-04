@@ -30,6 +30,9 @@ Usage:
   s doctor
   s audit [--json]
   s password change --auth
+  s migrate-key
+  s recovery rotate --auth
+  s recovery use
   s import FILE|--stdin
   s export --auth
   s delete NAME --auth
@@ -48,7 +51,9 @@ COMMAND_HELP = {
     "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd update NAME | s cmd run NAME\nStores and runs command templates.",
     "history": "s history NAME\nLists value history metadata only. Never prints previous values.",
     "backup": "s backup [--to DIR]\nCreates an encrypted backup without decrypting secret values.",
-    "password": "s password change --auth\nHuman-only master key rotation. Re-encrypts all values and history, then updates the configured key file.",
+    "password": "s password change --auth\nHuman-only master key rotation. Rewraps the vault key without storing the raw master key.",
+    "migrate-key": "s migrate-key\nMigrates from plaintext key-file mode to wrapped vault-key mode and prints recovery codes once.",
+    "recovery": "s recovery rotate --auth | s recovery use\nRotates backup codes or uses one backup code to set a new master key.",
     "get": "s get NAME --auth\nHuman-only raw reveal. Refuses in agent mode and without TTY.",
     "import": "s import FILE | s import --stdin\nImports KEY=VALUE lines without echoing values.",
     "export": "s export --auth\nHuman-only export. Refuses in agent mode and without TTY.",
@@ -105,8 +110,14 @@ def main(argv: list[str] | None = None) -> int:
         cmd = argv[0]
 
         if cmd == "init":
+            had_master_config = core.master_config_exists()
             p = core.init_vault(force="--force" in argv)
             print(f"created {p}")
+            if not had_master_config and core.master_config_exists():
+                codes = core.rotate_recovery_codes(core.get_master_secret())
+                print("Recovery codes. Store these somewhere separate from the vault. They are shown once.")
+                for code in codes:
+                    print(code)
             return 0
 
         if cmd in {"ls", "list"}:
@@ -256,6 +267,43 @@ def main(argv: list[str] | None = None) -> int:
             core.rotate_password(current, new)
             print("master key updated")
             return 0
+
+        if cmd == "migrate-key":
+            codes = core.migrate_master_config()
+            print("Master key migrated. Store these recovery codes somewhere separate from the vault.")
+            for code in codes:
+                print(code)
+            return 0
+
+        if cmd == "recovery":
+            if len(argv) < 2:
+                raise core.VaultError("usage: s recovery rotate --auth | s recovery use")
+            sub = argv[1]
+            if sub == "rotate":
+                if len(argv) < 3 or argv[2] != "--auth":
+                    raise core.VaultError("usage: s recovery rotate --auth")
+                core.require_not_agent("rotate recovery codes")
+                core.require_tty("rotate recovery codes")
+                import getpass
+                master = getpass.getpass("master password: ")
+                codes = core.rotate_recovery_codes(master)
+                print("Recovery codes rotated. Store these somewhere separate from the vault.")
+                for code in codes:
+                    print(code)
+                return 0
+            if sub == "use":
+                core.require_not_agent("use recovery code")
+                core.require_tty("use recovery code")
+                import getpass
+                code = getpass.getpass("recovery code: ")
+                new = getpass.getpass("new master key: ")
+                again = getpass.getpass("repeat new master key: ")
+                if new != again:
+                    raise core.VaultError("new master key entries did not match")
+                core.recover_master_password(code, new)
+                print("master key recovered")
+                return 0
+            raise core.VaultError(f"unknown recovery subcommand: {sub}")
 
         if cmd == "import":
             parser = argparse.ArgumentParser(prog="s import")

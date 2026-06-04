@@ -104,7 +104,10 @@ def test_web_master_key_rotation_reencrypts_existing_values(tmp_path, monkeypatc
     try:
         request(base + "/api/items", method="POST", payload={"name":"ROTATE_KEY","value":"rotate_fake_secret","comment":"Rotate fake"}, key="password")
         request(base + "/api/master-key", method="POST", payload={"current_password":"password","new_password":"new-test-password"})
-        assert (tmp_path / "master.key").read_text().strip() == "new-test-password"
+        assert not (tmp_path / "master.key").exists()
+        master_config = json.loads((tmp_path / "master.json").read_text())
+        assert master_config["default_password_active"] is False
+        assert "new-test-password" not in json.dumps(master_config)
         code = f"{sys.executable} -c 'import os; print(os.environ[\"ROTATE_KEY\"])'"
         request(base + "/api/commands", method="POST", payload={"name":"ROTATE_PRINT","command": code,"uses":["ROTATE_KEY"],"comment":"Prints rotated fake"}, key="new-test-password")
         result = request(base + "/api/commands/ROTATE_PRINT/run", method="POST", payload={}, key="new-test-password")
