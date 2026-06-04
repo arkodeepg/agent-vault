@@ -165,3 +165,76 @@ def test_restore_backup_refuses_without_tty(tmp_path):
     proc = run_s(tmp_path, "restore-backup", backup_file, "--auth")
     assert proc.returncode == 1
     assert "without an interactive terminal" in proc.stderr
+
+
+def test_empty_stdin_and_noop_update_fail(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    proc = run_s(tmp_path, "add", "EMPTY_KEY", "--stdin", input_text="")
+    assert proc.returncode == 1
+    assert "empty value" in proc.stderr
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    proc = run_s(tmp_path, "update", "TEST_API_KEY")
+    assert proc.returncode == 1
+    assert "nothing to update" in proc.stderr
+
+
+def test_note_requires_comment_and_lists_without_value(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    proc = run_s(tmp_path, "add", "MY_NOTE", "--type", "note")
+    assert proc.returncode == 1
+    assert "note requires --comment" in proc.stderr
+    proc = run_s(tmp_path, "add", "MY_NOTE", "--type", "note", "--comment", "Remember this operational note")
+    assert proc.returncode == 0, proc.stderr
+    proc = run_s(tmp_path, "ls", "--json")
+    rows = json.loads(proc.stdout)
+    assert rows[0]["type"] == "note"
+    assert "Remember this operational note" in proc.stdout
+
+
+def test_duplicate_import_key_fails(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    proc = run_s(tmp_path, "import", "--stdin", input_text="A_KEY=one\nA_KEY=two\n")
+    assert proc.returncode == 1
+    assert "duplicate key" in proc.stderr
+
+
+def test_history_metadata_after_update(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    assert run_s(tmp_path, "update", "TEST_API_KEY", "--stdin", input_text="test_sk_updated_fake_only").returncode == 0
+    proc = run_s(tmp_path, "history", "TEST_API_KEY")
+    assert proc.returncode == 0, proc.stderr
+    assert "v1" in proc.stdout
+    assert FAKE not in proc.stdout
+    assert "test_sk_updated_fake_only" not in proc.stdout
+
+
+def test_command_update_archive_restore(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    code1 = "import os; print(os.environ['TEST_API_KEY'])"
+    code2 = "print('no-secret-output')"
+    assert run_s(tmp_path, "cmd", "add", "PRINT_FAKE", "--uses", "TEST_API_KEY", "--", PY, "-c", code1).returncode == 0
+    proc = run_s(tmp_path, "cmd", "update", "PRINT_FAKE", "--uses", "", "--comment", "No secret command", "--", PY, "-c", code2)
+    assert proc.returncode == 0, proc.stderr
+    proc = run_s(tmp_path, "cmd", "run", "PRINT_FAKE")
+    assert proc.returncode == 0, proc.stderr
+    assert "no-secret-output" in proc.stdout
+    proc = run_s(tmp_path, "cmd", "archive", "PRINT_FAKE")
+    assert proc.returncode == 0, proc.stderr
+    proc = run_s(tmp_path, "cmd", "run", "PRINT_FAKE")
+    assert proc.returncode == 1
+    assert "archived" in proc.stderr
+    proc = run_s(tmp_path, "cmd", "restore", "PRINT_FAKE")
+    assert proc.returncode == 0, proc.stderr
+    proc = run_s(tmp_path, "cmd", "run", "PRINT_FAKE")
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_doctor_reports_permissions_and_parse(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    proc = run_s(tmp_path, "doctor")
+    assert proc.returncode == 0
+    assert "file_permissions=ok" in proc.stdout
+    assert "vault_parse=ok" in proc.stdout
+    assert "server=not_started" in proc.stdout

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import copy
 import datetime as dt
 import getpass
 import hashlib
@@ -23,6 +22,7 @@ VERSION = 1
 DEFAULT_COMMENT_WORD_LIMIT = 180
 SAFE_TYPES = {"secret", "command", "note"}
 HUMAN_ONLY = {"get", "export", "delete", "purge", "rollback", "restore-backup"}
+MAX_VALUE_BYTES = 1024 * 1024
 
 
 class VaultError(Exception):
@@ -175,6 +175,13 @@ def validate_comment(comment: str) -> None:
         raise VaultError(f"comment exceeds {DEFAULT_COMMENT_WORD_LIMIT} words")
 
 
+def validate_value(value: str) -> None:
+    if value == "":
+        raise VaultError("empty value")
+    if len(value.encode()) > MAX_VALUE_BYTES:
+        raise VaultError("value exceeds 1 MiB limit")
+
+
 def item_public(name: str, item: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": name,
@@ -220,6 +227,7 @@ def list_items(include_all: bool = False, type_filter: str | None = None, tag: s
 
 def add_item(name: str, value: str, item_type: str = "secret", comment: str = "", tags: list[str] | None = None, uses: list[str] | None = None) -> None:
     validate_name(name)
+    validate_value(value)
     if item_type not in SAFE_TYPES:
         raise VaultError(f"invalid type: {item_type}")
     validate_comment(comment)
@@ -244,6 +252,10 @@ def add_item(name: str, value: str, item_type: str = "secret", comment: str = ""
 
 
 def update_item(name: str, value: str | None = None, comment: str | None = None, new_name: str | None = None, tags: list[str] | None = None, uses: list[str] | None = None) -> str:
+    if value is None and comment is None and new_name is None and tags is None and uses is None:
+        raise VaultError("nothing to update")
+    if value is not None:
+        validate_value(value)
     data = load_vault()
     if name not in data["items"]:
         raise VaultError(f"{name} not found")
@@ -278,6 +290,9 @@ def archive_item(name: str, archived: bool) -> None:
     data = load_vault()
     if name not in data["items"]:
         raise VaultError(f"{name} not found")
+    if bool(data["items"][name].get("archived", False)) == archived:
+        state = "archived" if archived else "active"
+        raise VaultError(f"{name} is already {state}")
     data["items"][name]["archived"] = archived
     data["items"][name]["updated_at"] = now_iso()
     audit(data, "restore" if not archived else "archive", name)
@@ -337,8 +352,13 @@ def add_command(name: str, cmd: list[str], comment: str = "", tags: list[str] | 
     add_item(name, json.dumps(cmd), item_type="command", comment=comment, tags=tags, uses=uses)
 
 
-def command_rows() -> list[dict[str, Any]]:
-    return list_items(type_filter="command")
+def command_rows(include_all: bool = False) -> list[dict[str, Any]]:
+    return list_items(include_all=include_all, type_filter="command")
+
+
+def update_command(name: str, comment: str | None = None, tags: list[str] | None = None, uses: list[str] | None = None, cmd: list[str] | None = None) -> str:
+    value = json.dumps(cmd) if cmd is not None else None
+    return update_item(name, value=value, comment=comment, tags=tags, uses=uses)
 
 
 def run_command(name: str) -> Result:
@@ -362,6 +382,7 @@ def run_command(name: str) -> Result:
 
 def parse_env_lines(text: str) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -376,6 +397,10 @@ def parse_env_lines(text: str) -> list[tuple[str, str]]:
         if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
             value = value[1:-1]
         validate_name(key)
+        validate_value(value)
+        if key in seen:
+            raise VaultError(f"duplicate key in import: {key}")
+        seen.add(key)
         pairs.append((key, value))
     return pairs
 
@@ -415,6 +440,13 @@ def import_env_text(text: str, comment: str = "Imported from env text") -> int:
 def import_env_file(path: str) -> int:
     return import_env_text(Path(path).read_text())
 
+
+
+def history_rows(name: str) -> list[dict[str, Any]]:
+    data = load_vault()
+    if name not in data["items"]:
+        raise VaultError(f"{name} not found")
+    return [{"version": i + 1, "ts": h.get("ts", "")} for i, h in enumerate(data["items"][name].get("history", []))]
 
 def export_values() -> str:
     require_not_agent("export secrets")
@@ -554,7 +586,16 @@ def doctor() -> list[str]:
     lines = [f"vault_path={s['vault_path']}", f"exists={s['exists']}", f"agent_mode={s.get('agent_mode', is_agent_mode())}"]
     if s.get("exists"):
         lines.append(f"items={s['items']}")
-        mode = oct(vault_path().stat().st_mode & 0o777)
+        path = vault_path()
+        mode_int = path.stat().st_mode & 0o777
+        mode = oct(mode_int)
         lines.append(f"file_mode={mode}")
+        lines.append("file_permissions=ok" if mode_int & 0o077 == 0 else "file_permissions=too_open")
+        try:
+            load_vault(path)
+            lines.append("vault_parse=ok")
+        except VaultError as exc:
+            lines.append(f"vault_parse=error:{exc}")
     lines.append("network=not_started")
+    lines.append("server=not_started")
     return lines

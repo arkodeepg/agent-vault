@@ -21,7 +21,11 @@ Usage:
   s run NAME [NAME...] -- command [args...]
   s cmd ls
   s cmd add NAME --uses KEY1,KEY2 [--comment TEXT] -- command [args...]
+  s cmd update NAME [--comment TEXT] [--uses KEY1,KEY2] [-- command]
+  s cmd archive NAME
+  s cmd restore NAME
   s cmd run NAME
+  s history NAME
   s status
   s doctor
   s audit [--json]
@@ -39,7 +43,8 @@ COMMAND_HELP = {
     "add": "s add NAME [--stdin] [--type secret|note] [--comment TEXT] [--tags a,b]\nAdds a secret or note. Values are never echoed.",
     "update": "s update NAME [--stdin] [--comment TEXT] [--name NEW_NAME] [--tags a,b]\nUpdates value or safe metadata.",
     "run": "s run NAME [NAME...] -- command [args...]\nInjects secrets as env vars and redacts output.",
-    "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd run NAME\nStores and runs command templates.",
+    "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd update NAME | s cmd run NAME\nStores and runs command templates.",
+    "history": "s history NAME\nLists value history metadata only. Never prints previous values.",
     "backup": "s backup [--to DIR]\nCreates an encrypted backup without decrypting secret values.",
     "get": "s get NAME --auth\nHuman-only raw reveal. Refuses in agent mode and without TTY.",
     "import": "s import FILE | s import --stdin\nImports KEY=VALUE lines without echoing values.",
@@ -71,7 +76,10 @@ def split_double_dash(argv: list[str]) -> tuple[list[str], list[str]]:
 
 def read_value(use_stdin: bool) -> str:
     if use_stdin:
-        return sys.stdin.read().rstrip("\n")
+        value = sys.stdin.read().rstrip("\n")
+        if not value:
+            raise core.VaultError("empty value")
+        return value
     import getpass
     value = getpass.getpass("value: ")
     if not value:
@@ -116,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.add_argument("--tags")
             ns = parser.parse_args(argv[1:])
             value = ns.comment if ns.type == "note" and not ns.stdin else read_value(ns.stdin)
+            if ns.type == "note" and not ns.comment:
+                raise core.VaultError("note requires --comment")
             core.add_item(ns.name, value, item_type=ns.type, comment=ns.comment, tags=core.parse_tags(ns.tags))
             print(f"added {ns.name}")
             return 0
@@ -158,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise core.VaultError("usage: s cmd ls|add|run")
             sub = argv[1]
             if sub == "ls":
-                print_rows(core.command_rows())
+                print_rows(core.command_rows(include_all="--all" in argv[2:]))
                 return 0
             if sub == "add":
                 before, after = split_double_dash(argv[2:])
@@ -171,6 +181,23 @@ def main(argv: list[str] | None = None) -> int:
                 core.add_command(ns.name, after, comment=ns.comment, tags=core.parse_tags(ns.tags), uses=core.parse_tags(ns.uses))
                 print(f"added command {ns.name}")
                 return 0
+            if sub == "update":
+                before, after = split_double_dash(argv[2:])
+                parser = argparse.ArgumentParser(prog="s cmd update")
+                parser.add_argument("name")
+                parser.add_argument("--uses")
+                parser.add_argument("--comment")
+                parser.add_argument("--tags")
+                ns = parser.parse_args(before)
+                final = core.update_command(ns.name, comment=ns.comment, tags=core.parse_tags(ns.tags) if ns.tags is not None else None, uses=core.parse_tags(ns.uses) if ns.uses is not None else None, cmd=after or None)
+                print(f"updated command {final}")
+                return 0
+            if sub in {"archive", "restore"}:
+                if len(argv) < 3:
+                    raise core.VaultError(f"usage: s cmd {sub} NAME")
+                core.archive_item(argv[2], archived=(sub == "archive"))
+                print(f"{sub}d command {argv[2]}")
+                return 0
             if sub == "run":
                 if len(argv) < 3:
                     raise core.VaultError("usage: s cmd run NAME")
@@ -179,6 +206,18 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write(result.err)
                 return result.code
             raise core.VaultError(f"unknown cmd subcommand: {sub}")
+
+
+        if cmd == "history":
+            if len(argv) < 2:
+                raise core.VaultError("usage: s history NAME")
+            rows = core.history_rows(argv[1])
+            if not rows:
+                print("no history")
+            else:
+                for r in rows:
+                    print(f"v{r['version']} {r['ts']}")
+            return 0
 
         if cmd == "status":
             print(json.dumps(core.status(), indent=2, sort_keys=True))

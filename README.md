@@ -104,6 +104,10 @@ s restore-backup <BACKUP_FILE> --auth
 - Permanent delete is never available to agents.
 - Raw secret reveal always requires human presence.
 
+## Agent Documentation
+
+Safe agent-facing usage docs live at `docs/AGENT_README.md`. The Docker web UI should include a copy button for this file.
+
 ## Local Smoke Test
 
 ```bash
