@@ -1,0 +1,43 @@
+# Docker Usage
+
+Docker mode packages the same `s` CLI and stores the encrypted vault at `/data/vault.senv`.
+
+CLI Docker mode exposes no ports. The future web UI must bind to `127.0.0.1` by default.
+
+## Build
+
+```bash
+docker build -t agent-vault:local .
+```
+
+The build is offline-friendly because required Python crypto packages are vendored under `docker/vendor`.
+
+## Help
+
+```bash
+docker run --rm agent-vault:local help
+```
+
+## Disposable Test Vault
+
+```bash
+mkdir -p data
+docker run --rm -v "$PWD/data:/data" -e S_KEY=test-password agent-vault:local init
+printf 'test_sk_1234567890abcdef_FAKE_ONLY' | docker run --rm -i -v "$PWD/data:/data" -e S_KEY=test-password agent-vault:local add TEST_API_KEY --stdin --comment "Fake key"
+docker run --rm -v "$PWD/data:/data" -e S_KEY=test-password agent-vault:local ls
+docker run --rm -v "$PWD/data:/data" -e S_KEY=test-password agent-vault:local run TEST_API_KEY -- python -c "import os; print(os.environ['TEST_API_KEY'])"
+```
+
+Expected command output:
+
+```text
+[REDACTED]
+```
+
+## Agent Mode
+
+```bash
+docker run --rm -v "$PWD/data:/data" -e S_AGENT_MODE=1 -e S_KEY=test-password agent-vault:local ls
+```
+
+Agent mode blocks raw reveal and destructive operations.

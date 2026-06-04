@@ -108,7 +108,7 @@ feat: polish cli edge cases
 
 ## Milestone 2: Docker CLI Packaging
 
-Status: pending
+Status: complete
 
 Deliver:
 
@@ -117,7 +117,15 @@ Deliver:
 - Localhost-only defaults for future server mode.
 - Docker smoke test for `s help`, `s init`, `s ls`, and `s run`.
 
-Commit when done:
+Verification completed:
+
+```bash
+scripts/smoke_docker.sh
+/mnt/DATA/AIW2/venv/bin/python -m pytest /mnt/DATA/projects/agent-vault/tests
+PYTHON=/mnt/DATA/AIW2/venv/bin/python scripts/smoke_cli.sh
+```
+
+Commit:
 
 ```text
 feat: add docker cli packaging

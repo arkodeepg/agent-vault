@@ -1,0 +1,15 @@
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+target/
+result
+result-*
+.direnv/
+data/
+backups/
+.tmp/
+*.senv
+.env

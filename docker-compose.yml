@@ -1,0 +1,10 @@
+services:
+  agent-vault:
+    build: .
+    image: agent-vault:local
+    environment:
+      S_VAULT_PATH: /data/vault.senv
+    volumes:
+      - ./data:/data
+    # CLI mode exposes no ports. Future web mode must bind to 127.0.0.1 by default.
+    command: help
