@@ -4,9 +4,7 @@ Agent Vault is single-user internal tooling for a trusted machine or private Tai
 
 ## Core Boundary
 
-```text
-Agents may use API-backed capabilities, but agents must never receive raw credentials.
-```
+> *Agents may use API-backed capabilities, but agents must never receive raw credentials.*
 
 Allowed:
 

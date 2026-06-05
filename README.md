@@ -4,9 +4,7 @@ Agent Vault is a local password manager and API broker for AI agents.
 
 Core rule:
 
-```text
-Agents may use API-backed capabilities, but agents must never receive, read, print, store, or pass around raw API credentials.
-```
+> *Agents may use API-backed capabilities, but agents must never receive, read, print, store, or pass around raw API credentials.*
 
 Agents see safe metadata and API responses. Agent Vault keeps the credentials, validates the destination, injects auth internally, and sends the request.
 

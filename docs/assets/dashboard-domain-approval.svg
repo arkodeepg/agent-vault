@@ -51,10 +51,7 @@
   <circle cx="1080" cy="90" r="220" fill="#4f46e5" opacity="0.13" filter="url(#soft)"/>
   <circle cx="180" cy="570" r="230" fill="#10b981" opacity="0.09" filter="url(#soft)"/>
 
-  <text class="eyebrow" x="62" y="68">Agent Vault dashboard</text>
-  <text class="title" x="62" y="110">Pending domain approval in the UI</text>
-  <text class="subtitle" x="62" y="142">Review the profile and sample URL, then approve or reject without exposing credentials.</text>
-
+  <g transform="translate(0,-82)">
   <g filter="url(#shadow)">
     <rect x="62" y="210" width="360" height="280" rx="24" fill="url(#panel)" stroke="#314157" stroke-width="1.3"/>
     <rect x="88" y="238" width="312" height="46" rx="12" fill="#121b2b" stroke="#2f3f55"/>
@@ -75,7 +72,8 @@
     <text class="heading" x="552" y="336">Validate request</text>
     <text class="copy" x="552" y="370">Profile: CLOUDFLARE</text>
     <text class="copy" x="552" y="398">Host: api.example.com</text>
-    <text class="copy" x="552" y="426">Sample URL checked by user</text>
+    <text class="copy" x="552" y="424">Sample URL checked</text>
+    <text class="copy" x="552" y="446">by user</text>
   </g>
 
   <g filter="url(#shadow)">
@@ -93,4 +91,5 @@
   <path class="line" d="M422 350 L520 350"/>
   <path class="line" d="M808 326 C852 296 878 274 920 260"/>
   <path class="line" d="M808 382 C856 412 884 430 920 438"/>
+  </g>
 </svg>
