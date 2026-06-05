@@ -1,175 +1,88 @@
 # Agent Vault
 
-Agent Vault is a password manager and secure API execution layer for AI agents. Agents can discover safe metadata and ask Agent Vault to perform authenticated API requests, but they must not receive raw API keys, passwords, env values, or exported secret data.
+Agent Vault is a local password manager and API broker for AI agents.
 
-Core thesis:
+Core rule:
 
 ```text
 Agents may use API-backed capabilities, but agents must never receive, read, print, store, or pass around raw API credentials.
 ```
 
-## Planned Modes
+Agents see safe metadata and API responses. Agent Vault keeps the credentials, validates the destination, injects auth internally, and sends the request.
 
-- CLI-only mode: install the `s` binary and use it directly from a terminal or agent workflow.
-- Docker/server mode: run a private container on the home server with a mounted encrypted vault and web UI.
-- Hybrid mode: use the same encrypted vault from both the CLI and Docker safely.
+## How It Works
 
-## Installation And First Run
-
-Run from this checkout:
-
-```bash
-PYTHONPATH="$PWD" python3 -m agent_vault.cli version
-PYTHONPATH="$PWD" python3 -m agent_vault.cli init
-PYTHONPATH="$PWD" python3 -m agent_vault.cli password change --auth
+```mermaid
+flowchart LR
+    A[Agent or script] -->|profile, method, URL, body| B[Agent Vault]
+    B --> C{Host approved?}
+    C -->|No| D[Create pending domain request]
+    C -->|Yes| E[Inject credential inside vault]
+    E --> F[External API]
+    F -->|response| B
+    B -->|API result, no raw key| A
 ```
 
-Or use the wrapper:
+## Domain Approval
+
+```mermaid
+flowchart TD
+    A[Script requests new host] --> B[Agent Vault blocks request]
+    B --> C[Pending approval appears in dashboard]
+    C --> D{User decision}
+    D -->|Approve| E[Host added to profile allowlist]
+    D -->|Reject| F[Profile unchanged]
+    E --> G[Future requests to that host can run]
+```
+
+Path changes on an already approved host can be handled by scripts. Host changes need approval once.
+
+## Quick Start
 
 ```bash
-bin/s version
 bin/s init
 bin/s password change --auth
+bin/s ls
 ```
 
-Important setup default:
-
-- The default master key is `password`.
-- Change it immediately to a strong master key with `s password change --auth` or the dashboard `Master key` tab.
-- `s init` prints recovery codes once. Store them somewhere separate from `vault.senv`, `master.json`, and normal backups.
-- If you lose the master key and all recovery codes, the vault cannot be recovered.
-
-Docker first run:
+Docker:
 
 ```bash
 docker compose up --build
 ```
 
-Then open the dashboard, unlock with `password`, and change the master key immediately.
-
-## Data Storage
-
-The default source of truth is two local files on disk:
+Open the dashboard:
 
 ```text
-vault.senv      encrypted vault data
-master.json     password verifier, wrapped vault key, and recovery-code metadata
+http://127.0.0.1:8787
 ```
 
-`master.json` does not store the raw master key. The master key unlocks a random vault encryption key, and that vault key decrypts `vault.senv`.
+The default master key is `password`. Change it immediately.
 
-## Default Master Key
+## Agent Usage
 
-The default master key is `password`. Change it immediately during setup.
-
-Change it from the web dashboard under `Master key`, or from the CLI:
+Agents should run with:
 
 ```bash
-s password change --auth
+S_AGENT_MODE=1
 ```
 
-Changing the master key rewraps the vault key. It does not write the raw master key to disk.
-
-During first setup and during `s migrate-key`, Agent Vault prints recovery codes once. Store them somewhere separate from the vault. If you forget the master key and lose all recovery codes, the vault is intentionally unrecoverable.
-
-Recommended paths:
-
-```text
-CLI local:       ~/.config/agent-vault/vault.senv
-Project local:   ./.senv
-Docker server:   /data/vault.senv
-```
-
-The vault path can be overridden:
+Safe discovery:
 
 ```bash
-S_VAULT_PATH=/path/to/vault.senv s ls
+S_AGENT_MODE=1 s ls
+S_AGENT_MODE=1 s api ls
 ```
 
-Secret values, command values, and value history are encrypted. Default `s ls` output shows only names and comments. Structured `s ls --json` output can include additional safe metadata for agent discovery. Raw secret values must never appear in normal logs, list output, or agent context.
-
-## Current CLI Command Surface
-
-Safe agent-facing commands currently implemented:
+Safe API call:
 
 ```bash
-s help
-s help <command>
-s init
-s ls
-s add <NAME>
-s update <NAME>
-s archive <NAME>
-s restore <NAME>
-s run <NAME> [NAME...] -- <command>
-s api ls
-s api add <PROFILE> --from profile.json
-s api request <PROFILE> --method GET --url https://api.example.com/path
-s api pending
-s api approve <REQUEST_ID>
-s api reject <REQUEST_ID>
-s cmd ls
-s cmd add <COMMAND_NAME> --uses API_KEY --comment "..." -- <command>
-s cmd update <COMMAND_NAME>
-s cmd run <COMMAND_NAME>
-s status
-s doctor
-s audit
-s backup
-s version
+S_AGENT_MODE=1 s api request BASECAMP \
+  --method GET \
+  --url https://3.basecampapi.com/example.json
 ```
 
-Human-only commands currently implemented:
-
-```bash
-s get <NAME> --auth
-s export --auth
-s delete <NAME> --auth
-s purge <NAME> --auth
-s rollback <NAME> --to <VERSION> --auth
-s restore-backup <BACKUP_FILE> --auth
-s password change --auth
-s migrate-key
-s recovery rotate --auth
-s recovery use
-```
-
-Human-only commands require an interactive confirmation flow and the current master key. The master key must not be passed as a visible command argument.
-
-## Python Usage
-
-Human/manual commands can still use raw injection when intentionally needed:
-
-```bash
-s api request OPENAI_PROFILE --method GET --url https://api.openai.com/v1/models
-```
-
-```python
-from agent_vault.client import api_request
-
-models = api_request(
-    profile="OPENAI_PROFILE",
-    method="GET",
-    url="https://api.openai.com/v1/models",
-)
-```
-
-For agent-run scripts, prefer the API request layer or client library. `s run` is a human/manual escape hatch because it gives the subprocess a raw secret.
-
-Agent HTTP API clients require:
-
-```bash
-AGENT_VAULT_URL=http://100.97.39.56:8787
-AGENT_VAULT_TOKEN=...
-```
-
-The server receives `AGENT_VAULT_TOKEN` as `S_AGENT_API_TOKEN` and uses it only to authorize API execution requests.
-
-## Domain Approval Flow
-
-API profiles include approved hosts. If an agent or script asks Agent Vault to call a new host, the request is blocked before credentials are injected and a pending domain approval is recorded.
-
-Approve or reject pending hosts from the dashboard `API Profiles` tab or from the CLI:
+Pending domains:
 
 ```bash
 s api pending
@@ -177,47 +90,25 @@ s api approve REQUEST_ID
 s api reject REQUEST_ID
 ```
 
-Path changes on an already approved host can be handled by scripts. Host changes need approval once.
+## Storage
 
-## Backup
-
-Backups copy encrypted vault data only. They must not decrypt secret values.
-
-Commands:
-
-```bash
-s backup
-s backup --to /path/to/backups
-s restore-backup <BACKUP_FILE> --auth
+```text
+vault.senv      encrypted vault data
+master.json     verifier, wrapped vault key, recovery-code metadata
 ```
 
-Back up `vault.senv` and `master.json` together. Store recovery codes separately from both files.
+The raw master key is not stored. Recovery codes are printed once during setup or rotation. Store them separately from vault backups.
 
-## CSV Export
+## Docs
 
-The web dashboard has an `Export CSV` button. It asks for the current master key before generating a CSV file with active items. The export uses real CSV quoting, so comments with commas, quotes, or newlines remain valid.
+- [Agent guide](docs/AGENT_README.md): what agents are allowed to do.
+- [Security model](docs/SECURITY.md): boundaries, risks, and diagrams.
+- [CLI usage](docs/CLI.md): command reference.
+- [Web UI](docs/WEB.md): dashboard usage.
+- [Docker usage](docs/DOCKER.md): container setup.
+- [Threat model](docs/THREAT_MODEL.md): standing project requirement.
 
-## Security Defaults
-
-- Single-user internal use only in v1.
-- Server binds to `127.0.0.1` by default.
-- No public exposure by default.
-- Web metadata and mutation APIs require the master key through the dashboard unlock flow.
-- Agent mode blocks reveal, export, delete, purge, rollback, and restore operations.
-- Permanent delete is never available to agents.
-- Raw secret reveal always requires human presence.
-- Dashboard master key rotation requires the current key and is blocked in agent mode.
-- The web UI has no multi-user auth in v1. Keep it private on localhost or Tailscale only.
-- Do not store recovery codes beside the vault backup.
-
-More detail: [Security Model](docs/SECURITY.md), [CLI Usage](docs/CLI.md), [Docker Usage](docs/DOCKER.md), [Web UI](docs/WEB.md), [Agent README](docs/AGENT_README.md).
-Threat model: [Agent Vault Threat Model](docs/THREAT_MODEL.md).
-
-## Agent Documentation
-
-Safe agent-facing usage docs live at `docs/AGENT_README.md`. The Docker web UI should include a copy button for this file.
-
-## Local Smoke Test
+## Test
 
 ```bash
 PYTHON=/mnt/DATA/AIW2/venv/bin/python scripts/smoke_cli.sh

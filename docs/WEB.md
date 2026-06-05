@@ -1,14 +1,8 @@
 # Web UI
 
-The web UI is intended for Docker mode. It is dark mode by default and maps to localhost only through `docker-compose.yml`.
+The dashboard is for Docker mode and private access only.
 
-## Default master key
-
-The default master key is `password`. Change it immediately with `s password change --auth` or the `Master key` tab in the dashboard.
-
-The dashboard updates `master.json`, which stores a verifier and wrapped vault key, not the raw master key.
-
-## Start
+Start:
 
 ```bash
 docker compose up --build
@@ -20,30 +14,35 @@ Open:
 http://127.0.0.1:8787
 ```
 
-## Features
+Default master key: `password`. Change it in the `Master key` tab.
 
-- Unlock the dashboard with the current master key.
-- Search by name, comment, type, tag, or dependency.
-- Add secrets and notes.
-- Update names, comments, tags, and values.
-- Archive and restore items.
-- Add and run stored commands.
-- View API profiles and approved hosts.
-- Approve or reject pending domain requests.
-- View activity metadata.
-- Export active items as CSV after entering the master key. CSV output uses proper quoting for commas, quotes, and newlines.
-- Copy agent documentation with the Copy agent docs button.
+## Tabs
+
+- `Details`: view and edit safe metadata, update values, archive or restore items.
+- `Add`: add secrets or notes.
+- `Command`: add stored command templates.
+- `API Profiles`: view approved hosts and approve or reject pending domains.
+- `Master key`: rotate the dashboard master key.
+- `Activity Log`: view audit metadata.
+
+## Domain Approval
+
+```mermaid
+flowchart LR
+    A[Pending host appears] --> B[Review profile and sample URL]
+    B --> C{Decision}
+    C -->|Approve| D[Host added to allowlist]
+    C -->|Reject| E[Request remains blocked]
+```
+
+Approving a domain updates the API profile allowlist. It does not reveal secret values.
 
 ## Security Defaults
 
-- Compose binds to `127.0.0.1:8787`, not the LAN.
+- Compose binds to `127.0.0.1:8787` by default.
 - Metadata and mutation APIs require the dashboard unlock key.
-- The web UI does not expose raw reveal, delete, purge, rollback, or restore-backup.
-- Domain approval only updates API profile host allowlists. It does not reveal secret values.
-- CSV export is master-key gated and refuses to run in agent mode.
+- Raw reveal, delete, purge, rollback, and restore-backup are not exposed in the UI.
+- Responses use `Cache-Control: no-store`.
 - Request bodies are not logged by default.
-- Browser responses use `Cache-Control: no-store`.
-- Vault data lives in the mounted `./data` directory as encrypted JSON plus `master.json`.
-- If the master key and all recovery codes are lost, the vault cannot be recovered.
 
-Do not run this on `0.0.0.0` unless you intentionally put it behind trusted private networking such as Tailscale or an authenticated local reverse proxy.
+Do not publish the dashboard directly to the internet. Use localhost or Tailscale.

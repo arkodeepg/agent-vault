@@ -1,105 +1,98 @@
 # Security Model
 
-Agent Vault is designed for one-person internal use on a trusted machine or private Tailscale network. It is not a multi-user password manager.
+Agent Vault is single-user internal tooling for a trusted machine or private Tailscale network. It is not a shared password manager.
 
-## Storage
-
-Vault state is split across two files:
+## Core Boundary
 
 ```text
-vault.senv      encrypted secret values, command values, and history
-master.json     password verifier, wrapped vault key, and recovery-code metadata
+Agents may use API-backed capabilities, but agents must never receive raw credentials.
 ```
 
-The raw master key is not stored. The entered master key is checked against a slow scrypt verifier, then used to unwrap a random vault encryption key. That vault key decrypts `vault.senv`.
+Allowed:
 
-Changing the master key rewraps the vault key. It does not need to decrypt and rewrite every stored secret.
-
-## Recovery
-
-First setup, migration, and `s recovery rotate --auth` print recovery codes once.
-
-Each recovery code can reset the master key one time. Used codes are removed from `master.json`.
-
-Store recovery codes away from:
-
-- `vault.senv`
-- `master.json`
-- normal vault backups
-- chat logs and agent context
-
-If the master key and all recovery codes are lost, the vault is intentionally unrecoverable.
-
-## Agent Boundaries
-
-Agents can list safe metadata and ask Agent Vault to perform authenticated API requests. They must not receive raw secret values.
-
-Core rule:
-
-```text
-Agents may use API-backed capabilities, but agents must never receive, read, print, store, or pass around raw API credentials.
-```
+- list safe metadata
+- request API calls through approved profiles
+- add or update values only when the user explicitly provides them
+- archive old entries
 
 Blocked in agent mode:
 
-```bash
-s get
-s run
-s export
-s delete
-s purge
-s rollback
-s restore-backup
-s password change
-s recovery rotate
-s recovery use
+- raw reveal
+- raw secret injection into subprocesses
+- export
+- delete, purge, rollback
+- restore backup
+- password or recovery changes
+
+## API Broker
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Vault as Agent Vault
+    participant API as External API
+
+    Agent->>Vault: profile, method, URL, headers, body
+    Vault->>Vault: validate profile and host
+    Vault->>Vault: inject credential internally
+    Vault->>API: authenticated request
+    API-->>Vault: response
+    Vault-->>Agent: response without raw credential
 ```
 
-Stored commands that use secrets are also blocked in agent mode. Agents should use `s api request` for API-backed work and archive instead of deleting.
+The agent never receives the API key. It only receives the API response.
 
-## API Broker And Domain Approval
+## Domain Approval
 
-`s api request` and `POST /api/agent/request` are the agent-safe API broker paths. Agent Vault validates the URL, injects credentials internally, sends the request, and returns the API response. The agent does not receive the raw credential.
+```mermaid
+flowchart TD
+    A[Request to new host] --> B[Block before auth injection]
+    B --> C[Store pending approval]
+    C --> D[Dashboard API Profiles tab]
+    D --> E{User decision}
+    E -->|Approve| F[Add host to profile allowlist]
+    E -->|Reject| G[Leave profile unchanged]
+```
 
-Each API profile has an approved host allowlist. If a request uses a new host, Agent Vault blocks the request before auth injection and records a pending approval. The user can approve or reject the host from the dashboard or CLI.
+Rules:
 
-This supports controlled API changes:
+- Same host, new path: allowed if the profile already approves the host.
+- New host: blocked until approved.
+- Pending records store profile, host, sample URL, count, and timestamps.
+- Pending records do not store raw secrets.
 
-- Path changes can be handled by scripts when the host stays approved.
-- Host or domain changes require explicit approval before any credential is sent.
-- Pending approvals store metadata such as profile, host, sample URL, timestamps, and count. They do not store raw secrets.
+## Storage
+
+```text
+vault.senv      encrypted vault data
+master.json     verifier, wrapped vault key, recovery-code metadata
+```
+
+The raw master key is not stored. The master key unwraps a random vault key. Changing the master key rewraps that vault key.
+
+Recovery codes are printed once. Store them away from `vault.senv`, `master.json`, backups, chats, and agent context.
 
 ## Web UI
 
-The dashboard requires the master key before reading metadata or mutating vault state. The key is kept in browser session storage for the current browser session.
-
-The web server sends:
-
-- `Cache-Control: no-store`
-- restrictive content security policy
-- frame, MIME sniffing, referrer, and permissions-policy headers
+The dashboard requires the master key before reading metadata or changing vault state. The key is kept in browser session storage for the current browser session.
 
 The web UI does not expose raw reveal, purge, rollback, or restore-backup.
 
 ## Network Exposure
 
-Default web binding is localhost. For home-server access, expose it only through Tailscale or another private authenticated layer.
+Keep Agent Vault private:
 
-Do not publish the service directly to the public internet. There is no multi-user auth, rate limiting, account lockout, or audit-grade session management.
+- localhost for local use
+- Tailscale for home-server use
+- no direct public internet exposure
 
-## Backups
-
-Back up `vault.senv` and `master.json` together. Do not place recovery codes inside the same backup folder.
-
-Encrypted backup files are safe to copy, but if an attacker gets both the backup and the master key or a recovery code, they can recover the vault.
+There is no multi-user auth, account lockout, public rate limiting, or external audit system.
 
 ## Remaining Risks
 
-- A compromised host can read secrets when commands are run.
-- A malicious browser extension can access dashboard session storage.
-- Human-only raw secret injection remains risky because a command run through `s run` receives real secrets in its subprocess environment.
-- Agent Vault protects credentials. It does not decide whether an API action requested through an enabled profile is a good business action.
-- Safe metadata is not encrypted separately from normal vault access. Names, comments, tags, timestamps, and last-three-character hints are intentionally visible through list APIs after unlock.
-- This is single-user tooling, not a replacement for Bitwarden, 1Password, Vaultwarden, or HashiCorp Vault when shared access, policy controls, or external audit requirements matter.
-
-See `docs/THREAT_MODEL.md` for the standing project requirement.
+- A compromised host can attack the vault process or files.
+- A malicious browser extension can read dashboard session storage.
+- A human with the master key can intentionally export secrets.
+- Human-only raw command injection remains risky by design.
+- Agent Vault protects credentials, not the business logic of an API action.
+- Safe metadata is visible after unlock.

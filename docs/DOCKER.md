@@ -1,21 +1,6 @@
 # Docker Usage
 
-Docker mode packages the same `s` CLI and stores vault state under `/data`.
-
-CLI Docker mode exposes no ports. The web UI binds to `127.0.0.1` by default through compose.
-
-## Default master key
-
-The default master key is `password`. Change it immediately with `s password change --auth` or the `Master key` tab in the dashboard.
-
-Docker stores:
-
-```text
-/data/vault.senv      encrypted vault data
-/data/master.json     verifier, wrapped vault key, recovery-code metadata
-```
-
-`master.json` does not contain the raw master key. First setup prints recovery codes once. Store them outside the mounted `/data` directory.
+Docker mode packages the `s` CLI, web dashboard, and encrypted vault storage.
 
 ## Build
 
@@ -25,41 +10,7 @@ docker build -t agent-vault:local .
 
 The build is offline-friendly because required Python crypto packages are vendored under `docker/vendor`.
 
-## Help
-
-```bash
-docker run --rm agent-vault:local help
-docker run --rm agent-vault:local version
-```
-
-## Disposable Test Vault
-
-```bash
-mkdir -p data
-docker run --rm -v "$PWD/data:/data" agent-vault:local init
-printf 'test_sk_1234567890abcdef_FAKE_ONLY' | docker run --rm -i -v "$PWD/data:/data" agent-vault:local add TEST_API_KEY --stdin --comment "Fake key"
-docker run --rm -v "$PWD/data:/data" agent-vault:local ls
-docker run --rm -v "$PWD/data:/data" agent-vault:local api ls
-```
-
-Expected command output:
-
-```text
-[REDACTED]
-```
-
-## Agent Mode
-
-```bash
-docker run --rm -v "$PWD/data:/data" -e S_AGENT_MODE=1 agent-vault:local ls
-```
-
-Agent mode blocks raw reveal and destructive operations.
-Agent mode also blocks raw secret injection through `s run` and secret-backed stored commands. Use `s api request` for agent API access.
-
-## Web UI
-
-The web UI is dark mode by default and is intended for Docker mode. It includes search and a Copy agent docs button.
+## Run Dashboard
 
 ```bash
 docker compose up --build
@@ -71,23 +22,48 @@ Open:
 http://127.0.0.1:8787
 ```
 
-The compose file maps only `127.0.0.1:8787`, so it is not exposed on the LAN by default.
+Default master key: `password`. Change it immediately.
 
-The dashboard asks for the master key before loading metadata or allowing updates.
+## Storage
 
-On first run, unlock with `password`, then change the master key immediately in the `Master key` tab.
+```text
+/data/vault.senv      encrypted vault data
+/data/master.json     verifier, wrapped vault key, recovery-code metadata
+```
 
-## Agent API Token
+Store recovery codes outside the mounted `/data` directory.
 
-The agent HTTP API requires `S_AGENT_API_TOKEN`.
+## CLI In Container
+
+```bash
+docker run --rm agent-vault:local help
+docker run --rm agent-vault:local version
+docker run --rm -v "$PWD/data:/data" agent-vault:local ls
+```
+
+Agent mode:
+
+```bash
+docker run --rm -v "$PWD/data:/data" -e S_AGENT_MODE=1 agent-vault:local ls
+```
+
+## Agent HTTP Token
+
+Set:
 
 ```bash
 S_AGENT_API_TOKEN=avagt_example
 ```
 
-Agents send this value as `x-agent-vault-token`. This token lets agents ask Agent Vault to perform profile-approved API calls, but it does not reveal raw credentials.
+Agents send it as:
 
-## Migration
+```text
+x-agent-vault-token
+```
+
+This token allows brokered API requests only. It does not reveal raw credentials.
+
+## Legacy Migration
 
 Old Docker installs that used `/data/master.key` can migrate once:
 

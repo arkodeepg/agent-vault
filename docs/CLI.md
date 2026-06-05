@@ -1,28 +1,28 @@
 # CLI Usage
 
-Run from the project without installing:
+Use the wrapper:
 
 ```bash
-PYTHONPATH=/mnt/DATA/projects/agent-vault python3 -m agent_vault.cli help
+bin/s help
 ```
 
-Or use the wrapper:
+Or run from the checkout:
 
 ```bash
-/mnt/DATA/projects/agent-vault/bin/s help
+PYTHONPATH="$PWD" python3 -m agent_vault.cli help
 ```
 
-## Default master key
+## Setup
 
-The default master key is `password`. Change it immediately with `s password change --auth` or the `Master key` tab in the dashboard.
+```bash
+s init
+s password change --auth
+s recovery rotate --auth
+```
 
-Agent Vault stores `master.json` beside the vault. It contains a verifier, a wrapped random vault key, and recovery-code metadata, not the raw master key.
+Default master key: `password`. Change it immediately.
 
-`s init` prints recovery codes once. Store them separately. If the master key and all recovery codes are lost, the vault cannot be recovered.
-
-## Vault Location
-
-Set the vault path explicitly:
+Vault path:
 
 ```bash
 export S_VAULT_PATH=/path/to/vault.senv
@@ -30,64 +30,29 @@ export S_VAULT_PATH=/path/to/vault.senv
 
 If omitted, Agent Vault uses `./.senv` when present, otherwise `~/.config/agent-vault/vault.senv`.
 
-## Password
-
-For non-interactive local testing only:
+## Common Commands
 
 ```bash
-export S_KEY=test-password
-```
-
-For real use, prefer an interactive prompt or a password command through `S_KEY=!command`. Do not put real passwords directly into shell history.
-
-Legacy key-file vaults can be migrated:
-
-```bash
-s migrate-key
-```
-
-Recovery commands:
-
-```bash
-s recovery rotate --auth
-s recovery use
-```
-
-## Core Flow
-
-```bash
-s version
-s init
-s password change --auth
-printf 'fake-value' | s add TEST_API_KEY --stdin --comment "Fake key" --tags api,test
 s ls
-s update TEST_API_KEY --comment "Updated comment"
-s api ls
+s ls --json
+s add NAME --stdin --comment "What this is for"
+s update NAME --comment "Updated note"
+s archive NAME
+s restore NAME
 s backup --to ./backups
+s status
+s doctor
 ```
 
-Default `s ls` output shows only the item name and comment. Use `s ls --json` when an agent needs structured safe metadata.
-
-Human-only `run` injects the secret as an env var and redacts the value from stdout and stderr. Agents must use `s api request` instead.
-
-## Agent Mode
+## API Profiles
 
 ```bash
-S_AGENT_MODE=1 s ls
-S_AGENT_MODE=1 s get TEST_API_KEY --auth
-S_AGENT_MODE=1 s run TEST_API_KEY -- python3 script.py
+s api ls
+s api add PROFILE --from profile.json
+s api request PROFILE --method GET --url https://api.example.com/path
 ```
 
-The second and third commands must fail. Agent mode blocks raw reveal, raw secret injection, export, delete, purge, rollback, and restore-backup.
-
-Agent API usage:
-
-```bash
-S_AGENT_MODE=1 s api ls
-S_AGENT_MODE=1 s api request PROFILE --method GET --url https://api.example.com/path
-```
-
-Domain approval commands:
+Domain approvals:
 
 ```bash
 s api pending
@@ -96,9 +61,24 @@ s api approve REQUEST_ID
 s api reject REQUEST_ID
 ```
 
-API profiles have an allowlist of approved hosts. If an API request uses a different host, Agent Vault blocks it and stores a pending approval. Approving the request adds that host to the profile. Rejecting it leaves the profile unchanged.
+Unapproved hosts are blocked before credentials are injected.
 
-## Human-only Commands
+## Agent Mode
+
+```bash
+S_AGENT_MODE=1 s ls
+S_AGENT_MODE=1 s api ls
+S_AGENT_MODE=1 s api request PROFILE --method GET --url https://api.example.com/path
+```
+
+These must fail in agent mode:
+
+```bash
+S_AGENT_MODE=1 s get NAME --auth
+S_AGENT_MODE=1 s run NAME -- python3 script.py
+```
+
+## Human-Only Commands
 
 These require an interactive terminal and `--auth`:
 
@@ -113,5 +93,3 @@ s password change --auth
 s recovery rotate --auth
 s recovery use
 ```
-
-Agents should use `archive` instead of delete.
