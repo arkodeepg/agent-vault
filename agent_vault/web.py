@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -199,6 +200,14 @@ class Handler(BaseHTTPRequestHandler):
         core.verify_master_password(password, action="authenticate web request")
         return password
 
+    def require_agent_auth(self) -> None:
+        expected = os.environ.get("S_AGENT_API_TOKEN", "")
+        if not expected:
+            raise core.VaultError("agent API token is not configured")
+        actual = self.headers.get("x-agent-vault-token", "")
+        if not actual or not hmac.compare_digest(actual, expected):
+            raise core.VaultError("agent API token did not match")
+
     def send_html(self) -> None:
         body = HTML.encode()
         self.send_response(200)
@@ -251,6 +260,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/status":
                 self.require_web_auth()
                 return json_response(self, 200, core.status())
+            if parsed.path == "/api/agent/profiles":
+                self.require_agent_auth()
+                return json_response(self, 200, core.api_profiles_public())
             json_response(self, 404, {"error": "not found"})
         except Exception as exc:
             self.handle_error(exc)
@@ -271,6 +283,23 @@ class Handler(BaseHTTPRequestHandler):
                 with core.master_password_context(password):
                     core.add_command(body.get("name", ""), cmd, comment=body.get("comment", ""), tags=body.get("tags", []), uses=body.get("uses", []))
                 return json_response(self, 200, {"ok": True})
+            if path == "/api/profiles":
+                password = self.require_web_auth()
+                body = self.read_json()
+                with core.master_password_context(password):
+                    core.add_api_profile(body.get("name", ""), body.get("profile", {}), comment=body.get("comment", ""), tags=body.get("tags", []))
+                return json_response(self, 200, {"ok": True})
+            if path == "/api/agent/request":
+                self.require_agent_auth()
+                body = self.read_json()
+                result = core.api_request(
+                    body.get("profile", ""),
+                    body.get("method", ""),
+                    body.get("url", ""),
+                    headers=body.get("headers", {}),
+                    body=body.get("body"),
+                )
+                return json_response(self, 200, result)
             if path.startswith("/api/items/") and path.endswith("/archive"):
                 self.require_web_auth()
                 name = unquote(path.split("/")[3])

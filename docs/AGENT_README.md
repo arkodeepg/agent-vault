@@ -6,7 +6,7 @@ This file is safe to give to coding agents, CLI agents, OpenCode, Codex, Claude 
 
 Agents must never request, print, export, log, or store raw secret values.
 
-Use Agent Vault to discover safe metadata and run commands with injected env vars. Secret values should stay inside Agent Vault and subprocess environments only.
+Use Agent Vault to discover safe metadata and make authenticated API requests. Secret values must stay inside Agent Vault.
 
 ## Required Agent Mode
 
@@ -35,17 +35,17 @@ Allowed in agent mode:
 ```bash
 s help
 s ls
+s api ls
+s api request
 s add
 s update
 s archive
 s restore
-s run
 s cmd ls
 s cmd add
 s cmd update
 s cmd archive
 s cmd restore
-s cmd run
 s import
 s backup
 s status
@@ -62,7 +62,7 @@ Use:
 ```bash
 S_AGENT_MODE=1 s ls
 S_AGENT_MODE=1 s ls --json
-S_AGENT_MODE=1 s cmd ls
+S_AGENT_MODE=1 s api ls
 ```
 
 Default text output shows only:
@@ -82,32 +82,37 @@ Use `s ls --json` when structured discovery is needed. JSON output can include a
 
 They do not show raw values.
 
-## Run a Script With a Secret
+## Make An API Request
 
-Use `s run` and pass secret names before `--`:
+Use `s api request`. Agent Vault keeps the raw credential internally and returns only the API response.
 
 ```bash
-S_AGENT_MODE=1 s run OPENAI_API_KEY -- python3 script.py
+S_AGENT_MODE=1 s api request BASECAMP \
+  --method GET \
+  --url https://3.basecampapi.com/example.json
 ```
 
-Inside Python:
+The profile controls which credential is used and which API host is allowed.
+
+## Run Scripts Safely
+
+Scripts should call `s api request` or the Agent Vault client library. They must not read API keys from environment variables.
+
+```bash
+python3 script.py
+```
+
+Python client example:
 
 ```python
-import os
-api_key = os.environ["OPENAI_API_KEY"]
+from agent_vault.client import api_request
+
+response = api_request(
+    profile="BASECAMP",
+    method="GET",
+    url="https://3.basecampapi.com/example.json",
+)
 ```
-
-If the script prints the secret, Agent Vault redacts it from stdout and stderr as `[REDACTED]`.
-
-## Run a Stored Command
-
-Use:
-
-```bash
-S_AGENT_MODE=1 s cmd run COMMAND_NAME
-```
-
-The stored command declares which secrets it needs. Agent Vault injects those secrets and redacts output.
 
 ## Add or Update Secrets
 
@@ -179,7 +184,7 @@ Before using Agent Vault, confirm:
 
 - `S_AGENT_MODE=1` is set.
 - You use `s ls` to discover, not `s get`.
-- You use `s run` or `s cmd run` to use secrets.
+- You use `s api request` to use APIs.
 - You never ask the user to paste raw secrets unless they are intentionally adding or updating a value.
 - You never print env vars that may contain secrets.
 - You archive instead of deleting.

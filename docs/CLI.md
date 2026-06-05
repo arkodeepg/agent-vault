@@ -62,22 +62,30 @@ s password change --auth
 printf 'fake-value' | s add TEST_API_KEY --stdin --comment "Fake key" --tags api,test
 s ls
 s update TEST_API_KEY --comment "Updated comment"
-s run TEST_API_KEY -- python3 -c 'import os; print(os.environ["TEST_API_KEY"])'
+s api ls
 s backup --to ./backups
 ```
 
 Default `s ls` output shows only the item name and comment. Use `s ls --json` when an agent needs structured safe metadata.
 
-`run` injects the secret as an env var and redacts the value from stdout and stderr.
+Human-only `run` injects the secret as an env var and redacts the value from stdout and stderr. Agents must use `s api request` instead.
 
 ## Agent Mode
 
 ```bash
 S_AGENT_MODE=1 s ls
 S_AGENT_MODE=1 s get TEST_API_KEY --auth
+S_AGENT_MODE=1 s run TEST_API_KEY -- python3 script.py
 ```
 
-The second command must fail. Agent mode blocks raw reveal, export, delete, purge, rollback, and restore-backup.
+The second and third commands must fail. Agent mode blocks raw reveal, raw secret injection, export, delete, purge, rollback, and restore-backup.
+
+Agent API usage:
+
+```bash
+S_AGENT_MODE=1 s api ls
+S_AGENT_MODE=1 s api request PROFILE --method GET --url https://api.example.com/path
+```
 
 ## Human-only Commands
 

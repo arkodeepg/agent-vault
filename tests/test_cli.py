@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 import tomllib
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,7 +79,7 @@ def test_add_list_update_archive_restore(tmp_path):
     assert json.loads(proc.stdout)[0]["name"] == "TEST_API_KEY"
 
 
-def test_run_redacts_python_output(tmp_path):
+def test_human_run_redacts_python_output(tmp_path):
     assert run_s(tmp_path, "init").returncode == 0
     assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", "--comment", "Fake test key", input_text=FAKE).returncode == 0
     code = "import os; print(os.environ['TEST_API_KEY'])"
@@ -105,6 +107,79 @@ def test_agent_mode_blocks_get(tmp_path):
     proc = run_s(tmp_path, "get", "TEST_API_KEY", "--auth", extra_env={"S_AGENT_MODE": "1"})
     assert proc.returncode == 1
     assert "agent mode" in proc.stderr
+
+
+def test_agent_mode_blocks_raw_secret_run(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    code = "import os; print(os.environ['TEST_API_KEY'])"
+    proc = run_s(tmp_path, "run", "TEST_API_KEY", "--", PY, "-c", code, extra_env={"S_AGENT_MODE": "1"})
+    assert proc.returncode == 1
+    assert "agent mode cannot run commands with raw secrets" in proc.stderr
+
+
+def test_agent_mode_blocks_stored_command_with_secret(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    code = "import os; print(os.environ['TEST_API_KEY'])"
+    assert run_s(tmp_path, "cmd", "add", "PRINT_FAKE", "--uses", "TEST_API_KEY", "--", PY, "-c", code).returncode == 0
+    proc = run_s(tmp_path, "cmd", "run", "PRINT_FAKE", extra_env={"S_AGENT_MODE": "1"})
+    assert proc.returncode == 1
+    assert "agent mode cannot run stored commands with raw secrets" in proc.stderr
+
+
+class FakeAPI(BaseHTTPRequestHandler):
+    seen_auth = ""
+
+    def log_message(self, fmt, *args):
+        return
+
+    def do_GET(self):
+        FakeAPI.seen_auth = self.headers.get("Authorization", "")
+        body = json.dumps({"ok": True, "auth_seen": bool(FakeAPI.seen_auth)}).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def test_agent_api_request_uses_key_without_exposing_it(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeAPI)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({
+        "auth_type": "bearer_header",
+        "credential_names": ["TEST_API_KEY"],
+        "allowed_hosts": ["127.0.0.1"],
+    }))
+    try:
+        proc = run_s(tmp_path, "api", "add", "TEST_PROFILE", "--from", str(profile), "--comment", "Fake API profile")
+        assert proc.returncode == 0, proc.stderr
+        proc = run_s(
+            tmp_path,
+            "api",
+            "request",
+            "TEST_PROFILE",
+            "--method",
+            "GET",
+            "--url",
+            f"http://127.0.0.1:{port}/test",
+            extra_env={"S_AGENT_MODE": "1"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert FAKE not in proc.stdout
+        result = json.loads(proc.stdout)
+        assert result["status"] == 200
+        assert result["body"]["ok"] is True
+        assert FakeAPI.seen_auth == f"Bearer {FAKE}"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
 
 
 def test_backup_does_not_decrypt_secret(tmp_path):

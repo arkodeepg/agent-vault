@@ -39,7 +39,7 @@ mkdir -p data
 docker run --rm -v "$PWD/data:/data" agent-vault:local init
 printf 'test_sk_1234567890abcdef_FAKE_ONLY' | docker run --rm -i -v "$PWD/data:/data" agent-vault:local add TEST_API_KEY --stdin --comment "Fake key"
 docker run --rm -v "$PWD/data:/data" agent-vault:local ls
-docker run --rm -v "$PWD/data:/data" agent-vault:local run TEST_API_KEY -- python -c "import os; print(os.environ['TEST_API_KEY'])"
+docker run --rm -v "$PWD/data:/data" agent-vault:local api ls
 ```
 
 Expected command output:
@@ -55,6 +55,7 @@ docker run --rm -v "$PWD/data:/data" -e S_AGENT_MODE=1 agent-vault:local ls
 ```
 
 Agent mode blocks raw reveal and destructive operations.
+Agent mode also blocks raw secret injection through `s run` and secret-backed stored commands. Use `s api request` for agent API access.
 
 ## Web UI
 
@@ -75,6 +76,16 @@ The compose file maps only `127.0.0.1:8787`, so it is not exposed on the LAN by 
 The dashboard asks for the master key before loading metadata or allowing updates.
 
 On first run, unlock with `password`, then change the master key immediately in the `Master key` tab.
+
+## Agent API Token
+
+The agent HTTP API requires `S_AGENT_API_TOKEN`.
+
+```bash
+S_AGENT_API_TOKEN=avagt_example
+```
+
+Agents send this value as `x-agent-vault-token`. This token lets agents ask Agent Vault to perform profile-approved API calls, but it does not reveal raw credentials.
 
 ## Migration
 

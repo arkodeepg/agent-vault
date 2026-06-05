@@ -1,6 +1,12 @@
 # Agent Vault
 
-Agent Vault is a password manager for AI agents. Agents can discover safe metadata and run scripts with injected secrets, but they do not get to see raw API keys, passwords, env values, or exported secret data.
+Agent Vault is a password manager and secure API execution layer for AI agents. Agents can discover safe metadata and ask Agent Vault to perform authenticated API requests, but they must not receive raw API keys, passwords, env values, or exported secret data.
+
+Core thesis:
+
+```text
+Agents may use API-backed capabilities, but agents must never receive, read, print, store, or pass around raw API credentials.
+```
 
 ## Planned Modes
 
@@ -96,6 +102,9 @@ s update <NAME>
 s archive <NAME>
 s restore <NAME>
 s run <NAME> [NAME...] -- <command>
+s api ls
+s api add <PROFILE> --from profile.json
+s api request <PROFILE> --method GET --url https://api.example.com/path
 s cmd ls
 s cmd add <COMMAND_NAME> --uses API_KEY --comment "..." -- <command>
 s cmd update <COMMAND_NAME>
@@ -126,18 +135,32 @@ Human-only commands require an interactive confirmation flow and the current mas
 
 ## Python Usage
 
-Agent Vault injects secrets as environment variables, so Python works normally:
+Human/manual commands can still use raw injection when intentionally needed:
 
 ```bash
-s run OPENAI_API_KEY -- venv/bin/python execution/example.py
+s api request OPENAI_PROFILE --method GET --url https://api.openai.com/v1/models
 ```
 
 ```python
-import os
-api_key = os.environ["OPENAI_API_KEY"]
+from agent_vault.client import api_request
+
+models = api_request(
+    profile="OPENAI_PROFILE",
+    method="GET",
+    url="https://api.openai.com/v1/models",
+)
 ```
 
-If a script accidentally prints the key, Agent Vault should redact it from stdout and stderr.
+For agent-run scripts, prefer the API request layer or client library. `s run` is a human/manual escape hatch because it gives the subprocess a raw secret.
+
+Agent HTTP API clients require:
+
+```bash
+AGENT_VAULT_URL=http://100.97.39.56:8787
+AGENT_VAULT_TOKEN=...
+```
+
+The server receives `AGENT_VAULT_TOKEN` as `S_AGENT_API_TOKEN` and uses it only to authorize API execution requests.
 
 ## Backup
 
@@ -171,6 +194,7 @@ The web dashboard has an `Export CSV` button. It asks for the current master key
 - Do not store recovery codes beside the vault backup.
 
 More detail: [Security Model](docs/SECURITY.md), [CLI Usage](docs/CLI.md), [Docker Usage](docs/DOCKER.md), [Web UI](docs/WEB.md), [Agent README](docs/AGENT_README.md).
+Threat model: [Agent Vault Threat Model](docs/THREAT_MODEL.md).
 
 ## Agent Documentation
 

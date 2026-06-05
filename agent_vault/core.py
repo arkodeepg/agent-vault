@@ -19,6 +19,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib import error as urlerror
+from urllib import request as urlrequest
+from urllib.parse import urlencode, urlparse
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -28,8 +31,13 @@ from . import __version__
 VERSION = 1
 DEFAULT_COMMENT_WORD_LIMIT = 180
 SAFE_TYPES = {"secret", "command", "note"}
+API_PROFILE_TYPE = "api_profile"
+SAFE_TYPES.add(API_PROFILE_TYPE)
 HUMAN_ONLY = {"get", "export", "delete", "purge", "rollback", "restore-backup"}
 MAX_VALUE_BYTES = 1024 * 1024
+MAX_API_BODY_BYTES = 1024 * 1024
+PROTECTED_AUTH_HEADERS = {"authorization", "x-api-key", "api-key", "apikey", "bearer"}
+SUPPORTED_API_AUTH = {"bearer_header", "custom_header", "query_param", "basic_auth", "none"}
 DEFAULT_PASSWORD = "password"
 DEFAULT_PASSWORD_FILE = "master.key"
 MASTER_CONFIG_FILE = "master.json"
@@ -401,6 +409,31 @@ def audit(data: dict[str, Any], action: str, name: str = "", ok: bool = True) ->
     data["audit"] = data["audit"][-200:]
 
 
+def audit_api_request(
+    data: dict[str, Any],
+    profile: str,
+    method: str,
+    url: str,
+    status: int,
+    ok: bool,
+    request_id: str,
+) -> None:
+    parsed = urlparse(url)
+    data.setdefault("audit", []).append({
+        "ts": now_iso(),
+        "action": "api-request",
+        "name": profile,
+        "mode": "agent" if is_agent_mode() else "human-or-cli",
+        "ok": ok,
+        "method": method.upper(),
+        "host": parsed.hostname or "",
+        "path": parsed.path,
+        "status": status,
+        "request_id": request_id,
+    })
+    data["audit"] = data["audit"][-200:]
+
+
 def validate_name(name: str) -> None:
     if not name:
         raise VaultError("name is required")
@@ -585,6 +618,8 @@ def redact(text: str, secrets: list[str]) -> str:
 
 
 def run_with_secrets(names: list[str], cmd: list[str]) -> Result:
+    if is_agent_mode():
+        raise VaultError("agent mode cannot run commands with raw secrets. use `s api request` instead")
     if not cmd:
         raise VaultError("missing command after --")
     values = decrypt_many(names)
@@ -619,6 +654,8 @@ def run_command(name: str) -> Result:
         raise VaultError(f"{name} is not a command")
     if item.get("archived"):
         raise VaultError(f"{name} is archived")
+    if is_agent_mode() and item.get("uses"):
+        raise VaultError("agent mode cannot run stored commands with raw secrets. use `s api request` instead")
     password = get_vault_key()
     cmd = json.loads(decrypt_text(item["value"], password))
     values = decrypt_many(item.get("uses", []))
@@ -626,6 +663,170 @@ def run_command(name: str) -> Result:
     env.update(values)
     proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     return Result(proc.returncode, redact(proc.stdout, list(values.values())), redact(proc.stderr, list(values.values())))
+
+
+def add_api_profile(name: str, profile: dict[str, Any], comment: str = "", tags: list[str] | None = None) -> None:
+    validate_api_profile(profile)
+    uses = list(profile.get("credential_names", []))
+    add_item(name, json.dumps(profile, sort_keys=True), item_type=API_PROFILE_TYPE, comment=comment, tags=tags or ["api-profile"], uses=uses)
+
+
+def api_profile_rows(include_all: bool = False) -> list[dict[str, Any]]:
+    return list_items(include_all=include_all, type_filter=API_PROFILE_TYPE)
+
+
+def load_api_profile(name: str) -> dict[str, Any]:
+    data = load_vault()
+    if name not in data["items"]:
+        raise VaultError(f"{name} not found")
+    item = data["items"][name]
+    if item.get("archived"):
+        raise VaultError(f"{name} is archived")
+    if item.get("type") != API_PROFILE_TYPE:
+        raise VaultError(f"{name} is not an API profile")
+    password = get_vault_key()
+    profile = json.loads(decrypt_text(item["value"], password))
+    validate_api_profile(profile)
+    return profile
+
+
+def validate_api_profile(profile: dict[str, Any]) -> None:
+    auth_type = profile.get("auth_type")
+    if auth_type not in SUPPORTED_API_AUTH:
+        raise VaultError(f"unsupported API auth_type: {auth_type}")
+    hosts = profile.get("allowed_hosts", [])
+    if not isinstance(hosts, list) or not hosts:
+        raise VaultError("API profile requires allowed_hosts")
+    for host in hosts:
+        if not isinstance(host, str) or not host or "/" in host:
+            raise VaultError("API profile allowed_hosts must be bare hostnames")
+    credential_names = profile.get("credential_names", [])
+    if not isinstance(credential_names, list):
+        raise VaultError("API profile credential_names must be a list")
+    for name in credential_names:
+        validate_name(name)
+    if auth_type in {"bearer_header", "custom_header", "query_param", "basic_auth"} and not credential_names:
+        raise VaultError(f"{auth_type} requires credential_names")
+    if auth_type == "custom_header" and not profile.get("header_name"):
+        raise VaultError("custom_header requires header_name")
+    if auth_type == "query_param" and not profile.get("param_name"):
+        raise VaultError("query_param requires param_name")
+    if auth_type == "basic_auth" and len(credential_names) != 2:
+        raise VaultError("basic_auth requires exactly two credential_names")
+
+
+def api_profile_public(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": row["name"],
+        "comment": row.get("comment", ""),
+        "tags": row.get("tags", []),
+        "uses": row.get("uses", []),
+        "archived": bool(row.get("archived", False)),
+        "created_at": row.get("created_at", ""),
+        "updated_at": row.get("updated_at", ""),
+    }
+
+
+def api_profiles_public(include_all: bool = False) -> list[dict[str, Any]]:
+    return [api_profile_public(row) for row in api_profile_rows(include_all=include_all)]
+
+
+def normalize_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key, value in (headers or {}).items():
+        lower = key.lower()
+        if lower in PROTECTED_AUTH_HEADERS:
+            raise VaultError(f"header {key} is controlled by Agent Vault")
+        out[str(key)] = str(value)
+    return out
+
+
+def ensure_allowed_url(profile: dict[str, Any], url: str) -> None:
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if parsed.scheme != "https":
+        if not (parsed.scheme == "http" and host in {"127.0.0.1", "localhost"}):
+            raise VaultError("API requests must use https URLs except loopback HTTP")
+    allowed = set(profile.get("allowed_hosts", []))
+    if host not in allowed:
+        raise VaultError(f"host {host} is not allowed for this API profile")
+
+
+def inject_api_auth(profile: dict[str, Any], url: str, headers: dict[str, str]) -> tuple[str, dict[str, str], list[str]]:
+    auth_type = profile.get("auth_type")
+    names = list(profile.get("credential_names", []))
+    values = decrypt_many(names) if names else {}
+    secrets = list(values.values())
+    if auth_type == "none":
+        return url, headers, secrets
+    if auth_type == "bearer_header":
+        headers[profile.get("header_name", "Authorization")] = f"Bearer {values[names[0]]}"
+        return url, headers, secrets
+    if auth_type == "custom_header":
+        headers[str(profile["header_name"])] = values[names[0]]
+        return url, headers, secrets
+    if auth_type == "query_param":
+        parsed = urlparse(url)
+        sep = "&" if parsed.query else "?"
+        return f"{url}{sep}{urlencode({str(profile['param_name']): values[names[0]]})}", headers, secrets
+    if auth_type == "basic_auth":
+        raw = f"{values[names[0]]}:{values[names[1]]}".encode()
+        headers["Authorization"] = "Basic " + base64.b64encode(raw).decode()
+        return url, headers, secrets
+    raise VaultError(f"unsupported API auth_type: {auth_type}")
+
+
+def api_request(profile_name: str, method: str, url: str, headers: dict[str, str] | None = None, body: str | bytes | None = None) -> dict[str, Any]:
+    profile = load_api_profile(profile_name)
+    method = method.upper()
+    if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
+        raise VaultError(f"unsupported API method: {method}")
+    ensure_allowed_url(profile, url)
+    request_headers = normalize_headers(headers)
+    url, request_headers, secrets = inject_api_auth(profile, url, request_headers)
+    data: bytes | None
+    if body is None:
+        data = None
+    elif isinstance(body, bytes):
+        data = body
+    else:
+        data = body.encode()
+    if data is not None and len(data) > MAX_API_BODY_BYTES:
+        raise VaultError("API request body exceeds 1 MiB limit")
+    request_id = hashlib.sha256(f"{now_iso()}:{profile_name}:{method}:{url}".encode()).hexdigest()[:16]
+    req = urlrequest.Request(url, data=data, method=method, headers=request_headers)
+    data_store = load_vault()
+    try:
+        with urlrequest.urlopen(req, timeout=int(profile.get("timeout_seconds", 30))) as res:
+            raw = res.read()
+            status_code = int(res.status)
+            response_headers = dict(res.headers.items())
+    except urlerror.HTTPError as exc:
+        raw = exc.read()
+        status_code = int(exc.code)
+        response_headers = dict(exc.headers.items())
+    except urlerror.URLError as exc:
+        audit_api_request(data_store, profile_name, method, url, 0, False, request_id)
+        save_vault(data_store)
+        raise VaultError(f"API request failed: {exc}") from exc
+    text = raw.decode(errors="replace")
+    redacted_text = redact(text, secrets)
+    redacted_headers = {k: redact(v, secrets) for k, v in response_headers.items()}
+    audit_api_request(data_store, profile_name, method, url, status_code, 200 <= status_code < 400, request_id)
+    save_vault(data_store)
+    parsed_body: Any = redacted_text
+    ctype = response_headers.get("Content-Type", response_headers.get("content-type", ""))
+    if "json" in ctype:
+        try:
+            parsed_body = json.loads(redacted_text)
+        except json.JSONDecodeError:
+            parsed_body = redacted_text
+    return {
+        "status": status_code,
+        "headers": redacted_headers,
+        "body": parsed_body,
+        "request_id": request_id,
+    }
 
 
 

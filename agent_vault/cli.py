@@ -25,6 +25,9 @@ Usage:
   s cmd archive NAME
   s cmd restore NAME
   s cmd run NAME
+  s api ls
+  s api add PROFILE --from FILE [--comment TEXT] [--tags a,b]
+  s api request PROFILE --method METHOD --url URL [--header K=V] [--body TEXT|@FILE]
   s history NAME
   s status
   s doctor
@@ -48,8 +51,9 @@ COMMAND_HELP = {
     "ls": "s ls [--json] [--all] [--type TYPE] [--tag TAG]\nLists safe metadata only. Never prints raw values.",
     "add": "s add NAME [--stdin] [--type secret|note] [--comment TEXT] [--tags a,b]\nAdds a secret or note. Values are never echoed.",
     "update": "s update NAME [--stdin] [--comment TEXT] [--name NEW_NAME] [--tags a,b]\nUpdates value or safe metadata.",
-    "run": "s run NAME [NAME...] -- command [args...]\nInjects secrets as env vars and redacts output.",
-    "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd update NAME | s cmd run NAME\nStores and runs command templates.",
+    "run": "s run NAME [NAME...] -- command [args...]\nHuman/manual raw injection path. Refuses in agent mode.",
+    "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd update NAME | s cmd run NAME\nStores command templates. Secret-backed runs refuse in agent mode.",
+    "api": "s api ls | s api add PROFILE --from FILE | s api request PROFILE --method GET --url URL\nRuns API requests while keeping raw credentials inside Agent Vault.",
     "history": "s history NAME\nLists value history metadata only. Never prints previous values.",
     "version": "s version\nPrints the Agent Vault app version.",
     "backup": "s backup [--to DIR]\nCreates an encrypted backup without decrypting secret values.",
@@ -95,6 +99,26 @@ def read_value(use_stdin: bool) -> str:
     if not value:
         raise core.VaultError("empty value")
     return value
+
+
+def parse_headers(raw_headers: list[str]) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for raw in raw_headers:
+        if "=" not in raw:
+            raise core.VaultError("headers must use KEY=VALUE")
+        key, value = raw.split("=", 1)
+        if not key:
+            raise core.VaultError("header key cannot be empty")
+        headers[key] = value
+    return headers
+
+
+def read_body(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    if raw.startswith("@"):
+        return open(raw[1:], "r", encoding="utf-8").read()
+    return raw
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -226,6 +250,47 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write(result.err)
                 return result.code
             raise core.VaultError(f"unknown cmd subcommand: {sub}")
+
+        if cmd == "api":
+            if len(argv) < 2:
+                raise core.VaultError("usage: s api ls|add|request")
+            sub = argv[1]
+            if sub == "ls":
+                rows = core.api_profiles_public(include_all="--all" in argv[2:])
+                if "--json" in argv[2:]:
+                    print(json.dumps(rows, indent=2))
+                else:
+                    print_rows(rows)
+                return 0
+            if sub == "add":
+                parser = argparse.ArgumentParser(prog="s api add")
+                parser.add_argument("name")
+                parser.add_argument("--from", dest="from_file", required=True)
+                parser.add_argument("--comment", default="")
+                parser.add_argument("--tags")
+                ns = parser.parse_args(argv[2:])
+                profile = json.loads(open(ns.from_file, "r", encoding="utf-8").read())
+                core.add_api_profile(ns.name, profile, comment=ns.comment, tags=core.parse_tags(ns.tags))
+                print(f"added API profile {ns.name}")
+                return 0
+            if sub == "request":
+                parser = argparse.ArgumentParser(prog="s api request")
+                parser.add_argument("profile")
+                parser.add_argument("--method", required=True)
+                parser.add_argument("--url", required=True)
+                parser.add_argument("--header", action="append", default=[])
+                parser.add_argument("--body")
+                ns = parser.parse_args(argv[2:])
+                result = core.api_request(
+                    ns.profile,
+                    ns.method,
+                    ns.url,
+                    headers=parse_headers(ns.header),
+                    body=read_body(ns.body),
+                )
+                print(json.dumps(result, indent=2))
+                return 0
+            raise core.VaultError(f"unknown api subcommand: {sub}")
 
 
         if cmd == "history":

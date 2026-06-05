@@ -32,12 +32,19 @@ If the master key and all recovery codes are lost, the vault is intentionally un
 
 ## Agent Boundaries
 
-Agents can list safe metadata and run commands with injected secrets. They should not receive raw secret values.
+Agents can list safe metadata and ask Agent Vault to perform authenticated API requests. They must not receive raw secret values.
+
+Core rule:
+
+```text
+Agents may use API-backed capabilities, but agents must never receive, read, print, store, or pass around raw API credentials.
+```
 
 Blocked in agent mode:
 
 ```bash
 s get
+s run
 s export
 s delete
 s purge
@@ -48,7 +55,7 @@ s recovery rotate
 s recovery use
 ```
 
-Agents should archive instead of deleting.
+Stored commands that use secrets are also blocked in agent mode. Agents should use `s api request` for API-backed work and archive instead of deleting.
 
 ## Web UI
 
@@ -78,6 +85,9 @@ Encrypted backup files are safe to copy, but if an attacker gets both the backup
 
 - A compromised host can read secrets when commands are run.
 - A malicious browser extension can access dashboard session storage.
-- A command run through `s run` receives real secrets in its subprocess environment.
+- Human-only raw secret injection remains risky because a command run through `s run` receives real secrets in its subprocess environment.
+- Agent Vault protects credentials. It does not decide whether an API action requested through an enabled profile is a good business action.
 - Safe metadata is not encrypted separately from normal vault access. Names, comments, tags, timestamps, and last-three-character hints are intentionally visible through list APIs after unlock.
 - This is single-user tooling, not a replacement for Bitwarden, 1Password, Vaultwarden, or HashiCorp Vault when shared access, policy controls, or external audit requirements matter.
+
+See `docs/THREAT_MODEL.md` for the standing project requirement.

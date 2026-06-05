@@ -7,6 +7,7 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,32 @@ def request(url, method="GET", payload=None, key="test-password"):
         body = res.read().decode()
         ctype = res.headers.get("content-type", "")
         return body if "json" not in ctype else json.loads(body)
+
+
+def agent_request(url, method="GET", payload=None, token="agent-test-token"):
+    data = None if payload is None else json.dumps(payload).encode()
+    headers = {"content-type": "application/json", "x-agent-vault-token": token}
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    with urllib.request.urlopen(req, timeout=5) as res:
+        body = res.read().decode()
+        ctype = res.headers.get("content-type", "")
+        return body if "json" not in ctype else json.loads(body)
+
+
+class FakeAPIHandler(BaseHTTPRequestHandler):
+    seen_auth = ""
+
+    def log_message(self, fmt, *args):
+        return
+
+    def do_GET(self):
+        FakeAPIHandler.seen_auth = self.headers.get("Authorization", "")
+        body = json.dumps({"ok": True, "auth_seen": bool(FakeAPIHandler.seen_auth)}).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def test_html_is_dark_and_has_copy_docs():
@@ -89,6 +116,56 @@ def test_web_api_safe_routes(tmp_path, monkeypatch):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def test_agent_request_endpoint_uses_token_and_keeps_secret_internal(tmp_path, monkeypatch):
+    monkeypatch.setenv("S_KEY", "test-password")
+    monkeypatch.setenv("S_VAULT_PATH", str(tmp_path / "vault.senv"))
+    monkeypatch.setenv("S_AGENT_API_TOKEN", "agent-test-token")
+    core.init_vault()
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), FakeAPIHandler)
+    upstream_port = upstream.server_address[1]
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        request(base + "/api/items", method="POST", payload={"name":"WEB_API_KEY","value":"test_web_fake_secret","comment":"Web fake"})
+        request(base + "/api/profiles", method="POST", payload={
+            "name": "WEB_PROFILE",
+            "comment": "Web API profile",
+            "profile": {
+                "auth_type": "bearer_header",
+                "credential_names": ["WEB_API_KEY"],
+                "allowed_hosts": ["127.0.0.1"],
+            },
+        })
+        try:
+            agent_request(base + "/api/agent/request", method="POST", payload={
+                "profile": "WEB_PROFILE",
+                "method": "GET",
+                "url": f"http://127.0.0.1:{upstream_port}/test",
+            }, token="wrong")
+            raise AssertionError("agent request with wrong token succeeded")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+        result = agent_request(base + "/api/agent/request", method="POST", payload={
+            "profile": "WEB_PROFILE",
+            "method": "GET",
+            "url": f"http://127.0.0.1:{upstream_port}/test",
+        })
+        assert result["status"] == 200
+        assert result["body"]["ok"] is True
+        assert FakeAPIHandler.seen_auth == "Bearer test_web_fake_secret"
+        assert "test_web_fake_secret" not in json.dumps(result)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        upstream.shutdown()
+        upstream_thread.join(timeout=5)
 
 
 def test_web_master_key_rotation_reencrypts_existing_values(tmp_path, monkeypatch):
