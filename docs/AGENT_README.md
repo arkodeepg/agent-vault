@@ -37,6 +37,7 @@ s help
 s ls
 s api ls
 s api request
+s api pending
 s add
 s update
 s archive
@@ -93,6 +94,16 @@ S_AGENT_MODE=1 s api request BASECAMP \
 ```
 
 The profile controls which credential is used and which API host is allowed.
+
+If a script asks for a URL on a new host, Agent Vault blocks the request and records a pending domain approval. Agents must not work around that block or ask for raw credentials.
+
+Check pending approvals:
+
+```bash
+S_AGENT_MODE=1 s api pending
+```
+
+Only the user should approve or reject pending domains from the web dashboard or CLI after confirming the host belongs to the intended service.
 
 ## Run Scripts Safely
 
@@ -185,6 +196,7 @@ Before using Agent Vault, confirm:
 - `S_AGENT_MODE=1` is set.
 - You use `s ls` to discover, not `s get`.
 - You use `s api request` to use APIs.
+- You treat unapproved domains as blocked until the user approves them.
 - You never ask the user to paste raw secrets unless they are intentionally adding or updating a value.
 - You never print env vars that may contain secrets.
 - You archive instead of deleting.

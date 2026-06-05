@@ -366,7 +366,7 @@ def decrypt_text(blob: dict[str, str], password: str) -> str:
 
 
 def empty_vault() -> dict[str, Any]:
-    return {"version": VERSION, "items": {}, "audit": []}
+    return {"version": VERSION, "items": {}, "audit": [], "pending_hosts": []}
 
 
 def load_vault(path: Path | None = None) -> dict[str, Any]:
@@ -381,6 +381,7 @@ def load_vault(path: Path | None = None) -> dict[str, Any]:
         raise VaultError(f"unsupported vault version: {data.get('version')}")
     data.setdefault("items", {})
     data.setdefault("audit", [])
+    data.setdefault("pending_hosts", [])
     return data
 
 
@@ -716,7 +717,7 @@ def validate_api_profile(profile: dict[str, Any]) -> None:
 
 
 def api_profile_public(row: dict[str, Any]) -> dict[str, Any]:
-    return {
+    out = {
         "name": row["name"],
         "comment": row.get("comment", ""),
         "tags": row.get("tags", []),
@@ -725,6 +726,14 @@ def api_profile_public(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": row.get("created_at", ""),
         "updated_at": row.get("updated_at", ""),
     }
+    if not out["archived"]:
+        try:
+            profile = load_api_profile(row["name"])
+            out["auth_type"] = profile.get("auth_type", "")
+            out["allowed_hosts"] = profile.get("allowed_hosts", [])
+        except VaultError:
+            out["profile_error"] = "profile metadata unavailable"
+    return out
 
 
 def api_profiles_public(include_all: bool = False) -> list[dict[str, Any]]:
@@ -750,6 +759,89 @@ def ensure_allowed_url(profile: dict[str, Any], url: str) -> None:
     allowed = set(profile.get("allowed_hosts", []))
     if host not in allowed:
         raise VaultError(f"host {host} is not allowed for this API profile")
+
+
+def pending_host_id(profile: str, host: str) -> str:
+    return hashlib.sha256(f"{profile}:{host}".encode()).hexdigest()[:16]
+
+
+def record_pending_host(profile_name: str, method: str, url: str) -> None:
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if not host:
+        return
+    data = load_vault()
+    pid = pending_host_id(profile_name, host)
+    existing = next((row for row in data.setdefault("pending_hosts", []) if row.get("id") == pid and row.get("status") == "pending"), None)
+    if existing:
+        existing["last_seen_at"] = now_iso()
+        existing["count"] = int(existing.get("count", 1)) + 1
+        existing["sample_method"] = method.upper()
+        existing["sample_url"] = url
+    else:
+        data["pending_hosts"].append({
+            "id": pid,
+            "profile": profile_name,
+            "host": host,
+            "status": "pending",
+            "created_at": now_iso(),
+            "last_seen_at": now_iso(),
+            "count": 1,
+            "sample_method": method.upper(),
+            "sample_url": url,
+        })
+    audit(data, "pending-host", profile_name)
+    save_vault(data)
+
+
+def pending_host_rows(include_all: bool = False) -> list[dict[str, Any]]:
+    rows = load_vault().get("pending_hosts", [])
+    if include_all:
+        return rows
+    return [row for row in rows if row.get("status") == "pending"]
+
+
+def approve_pending_host(request_id: str) -> dict[str, Any]:
+    data = load_vault()
+    row = next((r for r in data.get("pending_hosts", []) if r.get("id") == request_id), None)
+    if not row:
+        raise VaultError(f"pending host request not found: {request_id}")
+    if row.get("status") != "pending":
+        raise VaultError(f"pending host request is already {row.get('status')}")
+    profile_name = row["profile"]
+    item = data["items"].get(profile_name)
+    if not item or item.get("type") != API_PROFILE_TYPE:
+        raise VaultError(f"{profile_name} API profile not found")
+    password = get_vault_key()
+    profile = json.loads(decrypt_text(item["value"], password))
+    validate_api_profile(profile)
+    allowed = list(profile.get("allowed_hosts", []))
+    if row["host"] not in allowed:
+        allowed.append(row["host"])
+    profile["allowed_hosts"] = allowed
+    item.setdefault("history", []).insert(0, {"value": item["value"], "ts": now_iso()})
+    item["history"] = item["history"][:5]
+    item["value"] = encrypt_text(json.dumps(profile, sort_keys=True), password)
+    item["updated_at"] = now_iso()
+    row["status"] = "approved"
+    row["resolved_at"] = now_iso()
+    audit(data, "approve-host", profile_name)
+    save_vault(data)
+    return row
+
+
+def reject_pending_host(request_id: str) -> dict[str, Any]:
+    data = load_vault()
+    row = next((r for r in data.get("pending_hosts", []) if r.get("id") == request_id), None)
+    if not row:
+        raise VaultError(f"pending host request not found: {request_id}")
+    if row.get("status") != "pending":
+        raise VaultError(f"pending host request is already {row.get('status')}")
+    row["status"] = "rejected"
+    row["resolved_at"] = now_iso()
+    audit(data, "reject-host", row.get("profile", ""))
+    save_vault(data)
+    return row
 
 
 def inject_api_auth(profile: dict[str, Any], url: str, headers: dict[str, str]) -> tuple[str, dict[str, str], list[str]]:
@@ -781,7 +873,11 @@ def api_request(profile_name: str, method: str, url: str, headers: dict[str, str
     method = method.upper()
     if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
         raise VaultError(f"unsupported API method: {method}")
-    ensure_allowed_url(profile, url)
+    try:
+        ensure_allowed_url(profile, url)
+    except VaultError:
+        record_pending_host(profile_name, method, url)
+        raise
     request_headers = normalize_headers(headers)
     url, request_headers, secrets = inject_api_auth(profile, url, request_headers)
     data: bytes | None

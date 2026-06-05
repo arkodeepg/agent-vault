@@ -105,6 +105,9 @@ s run <NAME> [NAME...] -- <command>
 s api ls
 s api add <PROFILE> --from profile.json
 s api request <PROFILE> --method GET --url https://api.example.com/path
+s api pending
+s api approve <REQUEST_ID>
+s api reject <REQUEST_ID>
 s cmd ls
 s cmd add <COMMAND_NAME> --uses API_KEY --comment "..." -- <command>
 s cmd update <COMMAND_NAME>
@@ -161,6 +164,20 @@ AGENT_VAULT_TOKEN=...
 ```
 
 The server receives `AGENT_VAULT_TOKEN` as `S_AGENT_API_TOKEN` and uses it only to authorize API execution requests.
+
+## Domain Approval Flow
+
+API profiles include approved hosts. If an agent or script asks Agent Vault to call a new host, the request is blocked before credentials are injected and a pending domain approval is recorded.
+
+Approve or reject pending hosts from the dashboard `API Profiles` tab or from the CLI:
+
+```bash
+s api pending
+s api approve REQUEST_ID
+s api reject REQUEST_ID
+```
+
+Path changes on an already approved host can be handled by scripts. Host changes need approval once.
 
 ## Backup
 

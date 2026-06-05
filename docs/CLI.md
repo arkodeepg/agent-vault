@@ -87,6 +87,17 @@ S_AGENT_MODE=1 s api ls
 S_AGENT_MODE=1 s api request PROFILE --method GET --url https://api.example.com/path
 ```
 
+Domain approval commands:
+
+```bash
+s api pending
+s api pending --all
+s api approve REQUEST_ID
+s api reject REQUEST_ID
+```
+
+API profiles have an allowlist of approved hosts. If an API request uses a different host, Agent Vault blocks it and stores a pending approval. Approving the request adds that host to the profile. Rejecting it leaves the profile unchanged.
+
 ## Human-only Commands
 
 These require an interactive terminal and `--auth`:

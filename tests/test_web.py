@@ -168,6 +168,70 @@ def test_agent_request_endpoint_uses_token_and_keeps_secret_internal(tmp_path, m
         upstream_thread.join(timeout=5)
 
 
+def test_web_pending_host_approval_flow(tmp_path, monkeypatch):
+    monkeypatch.setenv("S_KEY", "test-password")
+    monkeypatch.setenv("S_VAULT_PATH", str(tmp_path / "vault.senv"))
+    monkeypatch.setenv("S_AGENT_API_TOKEN", "agent-test-token")
+    core.init_vault()
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), FakeAPIHandler)
+    upstream_port = upstream.server_address[1]
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        request(base + "/api/items", method="POST", payload={"name":"WEB_API_KEY","value":"test_web_fake_secret","comment":"Web fake"})
+        request(base + "/api/profiles", method="POST", payload={
+            "name": "WEB_PROFILE",
+            "comment": "Web API profile",
+            "profile": {
+                "auth_type": "bearer_header",
+                "credential_names": ["WEB_API_KEY"],
+                "allowed_hosts": ["127.0.0.1"],
+            },
+        })
+        try:
+            agent_request(base + "/api/agent/request", method="POST", payload={
+                "profile": "WEB_PROFILE",
+                "method": "GET",
+                "url": f"http://localhost:{upstream_port}/test",
+            })
+            raise AssertionError("agent request to unapproved host succeeded")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+
+        pending = request(base + "/api/pending-hosts")
+        assert len(pending) == 1
+        assert pending[0]["profile"] == "WEB_PROFILE"
+        assert pending[0]["host"] == "localhost"
+        assert "test_web_fake_secret" not in json.dumps(pending)
+
+        approved = request(base + f"/api/pending-hosts/{pending[0]['id']}/approve", method="POST", payload={})
+        assert approved["status"] == "approved"
+
+        profiles = request(base + "/api/profiles")
+        profile = next(row for row in profiles if row["name"] == "WEB_PROFILE")
+        assert "localhost" in profile["allowed_hosts"]
+
+        result = agent_request(base + "/api/agent/request", method="POST", payload={
+            "profile": "WEB_PROFILE",
+            "method": "GET",
+            "url": f"http://localhost:{upstream_port}/test",
+        })
+        assert result["status"] == 200
+        assert result["body"]["ok"] is True
+        assert FakeAPIHandler.seen_auth == "Bearer test_web_fake_secret"
+        assert "test_web_fake_secret" not in json.dumps(result)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        upstream.shutdown()
+        upstream_thread.join(timeout=5)
+
+
 def test_web_master_key_rotation_reencrypts_existing_values(tmp_path, monkeypatch):
     monkeypatch.delenv("S_KEY", raising=False)
     monkeypatch.setenv("S_KEY_FILE", str(tmp_path / "master.key"))

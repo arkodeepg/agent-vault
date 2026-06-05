@@ -98,7 +98,7 @@ HTML = """<!doctype html>
     <div id="items" class="items-list"></div>
   </aside>
   <section>
-    <div class="tabs"><button data-tab="details" class="active">Details</button><button data-tab="add">Add</button><button data-tab="command">Command</button><button data-tab="master">Master key</button><button data-tab="audit">Activity Log</button></div>
+    <div class="tabs"><button data-tab="details" class="active">Details</button><button data-tab="add">Add</button><button data-tab="command">Command</button><button data-tab="profiles">API Profiles</button><button data-tab="master">Master key</button><button data-tab="audit">Activity Log</button></div>
     <div id="msg" class="status"></div>
     <div id="details" class="tab"></div>
     <div id="add" class="tab hidden card grid">
@@ -114,6 +114,17 @@ HTML = """<!doctype html>
       <div><label>Uses, comma separated secret names</label><input id="cmdUses" /></div>
       <div><label>Comment</label><textarea id="cmdComment"></textarea></div>
       <button class="primary" id="cmdAdd">Add command</button>
+    </div>
+    <div id="profiles" class="tab hidden">
+      <div class="card grid">
+        <div><h1>API Profiles</h1><div class="subhead">Approved domains control where Agent Vault may send credentials.</div></div>
+        <button id="refreshProfiles">Refresh profiles</button>
+        <pre id="profilesBox"></pre>
+      </div>
+      <div class="card grid">
+        <div><h1>Pending Domain Approvals</h1><div class="subhead">Approve a domain only after confirming it belongs to the service.</div></div>
+        <div id="pendingHosts"></div>
+      </div>
     </div>
     <div id="master" class="tab hidden card grid">
       <div id="masterWarn" class="alert hidden">Default master key is password. Change it immediately.</div>
@@ -140,6 +151,7 @@ function renderDetails(){ const i = selected(); if(!i){ $('details').innerHTML =
 function renderMasterWarning(){ const active = state.status?.password_source?.default_password_active === true; $('masterWarn').classList.toggle('hidden', !active); }
 function render(){ renderItems(); renderDetails(); renderMasterWarning(); }
 async function load(){ const qs = state.all ? '?all=1' : ''; const [items,status] = await Promise.all([api('/api/items'+qs), api('/api/status')]); state.items = items; state.status = status; if(state.selected && !state.items.find(i=>i.name===state.selected)) state.selected=null; render(); }
+async function loadProfiles(){ const [profiles,pending] = await Promise.all([api('/api/profiles'), api('/api/pending-hosts')]); $('profilesBox').textContent = JSON.stringify(profiles, null, 2); $('pendingHosts').innerHTML = pending.map(p => `<div class="card grid"><div><b>${esc(p.profile)}</b> requests <b>${esc(p.host)}</b></div><div class="meta">${esc(p.sample_method)} ${esc(p.sample_url)} · seen ${esc(p.count)} time(s)</div><div class="row"><button class="primary" data-approve="${esc(p.id)}">Approve</button><button class="danger" data-reject="${esc(p.id)}">Reject</button></div></div>`).join('') || '<div class="empty">No pending domains</div>'; document.querySelectorAll('[data-approve]').forEach(b=>b.onclick=async()=>{await api('/api/pending-hosts/'+encodeURIComponent(b.dataset.approve)+'/approve',{method:'POST'}); await loadProfiles();}); document.querySelectorAll('[data-reject]').forEach(b=>b.onclick=async()=>{await api('/api/pending-hosts/'+encodeURIComponent(b.dataset.reject)+'/reject',{method:'POST'}); await loadProfiles();}); }
 async function unlockWithKey(key){ sessionStorage.setItem('agentVaultKey', key); try { await load(); $('unlock').classList.add('hidden'); $('unlockKey').value=''; setMsg(''); } catch(e){ sessionStorage.removeItem('agentVaultKey'); setMsg(e.message); } }
 async function unlock(){ const key = $('unlockKey').value; if(!key){ setMsg('Master key is required'); return; } await unlockWithKey(key); }
 async function saveEdit(){ const i = selected(); const body = {comment:$('editComment').value, tags:tags($('editTags').value)}; if($('editName').value !== i.name) body.name = $('editName').value; if($('editValue').value) body.value = $('editValue').value; const r = await api('/api/items/'+encodeURIComponent(i.name), {method:'PATCH', body:JSON.stringify(body)}); state.selected = r.name; setMsg('Saved'); await load(); }
@@ -149,9 +161,9 @@ async function exportCsv(){ const password = prompt('Master key required for CSV
 $('addBtn').onclick = async()=>{ await api('/api/items',{method:'POST', body:JSON.stringify({name:$('addName').value,type:'secret',value:$('addValue').value,comment:$('addComment').value,tags:tags($('addTags').value)})}); setMsg('Added'); await load(); };
 $('cmdAdd').onclick = async()=>{ await api('/api/commands',{method:'POST', body:JSON.stringify({name:$('cmdName').value,command:$('cmdValue').value,uses:tags($('cmdUses').value),comment:$('cmdComment').value})}); setMsg('Command added'); await load(); };
 $('changeMaster').onclick = async()=>{ if($('newMaster').value !== $('repeatMaster').value){ setMsg('New master keys do not match'); return; } const nextKey = $('newMaster').value; await api('/api/master-key',{method:'POST', body:JSON.stringify({current_password:$('currentMaster').value,new_password:nextKey})}); sessionStorage.setItem('agentVaultKey', nextKey); $('currentMaster').value=''; $('newMaster').value=''; $('repeatMaster').value=''; setMsg('Master key updated'); await load(); };
-$('refresh').onclick = load; $('exportCsv').onclick = exportCsv; $('search').oninput = renderItems; $('typeFilter').onchange = renderItems; $('showAll').onclick=async()=>{state.all=!state.all; $('showAll').textContent=state.all?'Active':'All'; await load();};
+$('refresh').onclick = load; $('refreshProfiles').onclick = loadProfiles; $('exportCsv').onclick = exportCsv; $('search').oninput = renderItems; $('typeFilter').onchange = renderItems; $('showAll').onclick=async()=>{state.all=!state.all; $('showAll').textContent=state.all?'Active':'All'; await load();};
 $('unlockBtn').onclick = unlock; $('unlockKey').onkeydown = e => { if(e.key === 'Enter') unlock(); };
-document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden')); $(b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='audit') $('auditBox').textContent=JSON.stringify(await api('/api/audit'),null,2);});
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden')); $(b.dataset.tab).classList.remove('hidden'); if(b.dataset.tab==='audit') $('auditBox').textContent=JSON.stringify(await api('/api/audit'),null,2); if(b.dataset.tab==='profiles') await loadProfiles();});
 $('copyDocs').onclick = async()=>{ const t=await fetch('/api/agent-docs').then(r=>r.text()); await navigator.clipboard.writeText(t); setMsg('Agent documentation copied'); };
 if(webKey()) unlockWithKey(webKey()).catch(e=>setMsg(e.message));
 </script>
@@ -260,6 +272,12 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/status":
                 self.require_web_auth()
                 return json_response(self, 200, core.status())
+            if parsed.path == "/api/profiles":
+                self.require_web_auth()
+                return json_response(self, 200, core.api_profiles_public())
+            if parsed.path == "/api/pending-hosts":
+                self.require_web_auth()
+                return json_response(self, 200, core.pending_host_rows())
             if parsed.path == "/api/agent/profiles":
                 self.require_agent_auth()
                 return json_response(self, 200, core.api_profiles_public())
@@ -300,6 +318,14 @@ class Handler(BaseHTTPRequestHandler):
                     body=body.get("body"),
                 )
                 return json_response(self, 200, result)
+            if path.startswith("/api/pending-hosts/") and path.endswith("/approve"):
+                self.require_web_auth()
+                request_id = unquote(path.split("/")[3])
+                return json_response(self, 200, core.approve_pending_host(request_id))
+            if path.startswith("/api/pending-hosts/") and path.endswith("/reject"):
+                self.require_web_auth()
+                request_id = unquote(path.split("/")[3])
+                return json_response(self, 200, core.reject_pending_host(request_id))
             if path.startswith("/api/items/") and path.endswith("/archive"):
                 self.require_web_auth()
                 name = unquote(path.split("/")[3])

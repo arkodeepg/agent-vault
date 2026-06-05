@@ -57,6 +57,18 @@ s recovery use
 
 Stored commands that use secrets are also blocked in agent mode. Agents should use `s api request` for API-backed work and archive instead of deleting.
 
+## API Broker And Domain Approval
+
+`s api request` and `POST /api/agent/request` are the agent-safe API broker paths. Agent Vault validates the URL, injects credentials internally, sends the request, and returns the API response. The agent does not receive the raw credential.
+
+Each API profile has an approved host allowlist. If a request uses a new host, Agent Vault blocks the request before auth injection and records a pending approval. The user can approve or reject the host from the dashboard or CLI.
+
+This supports controlled API changes:
+
+- Path changes can be handled by scripts when the host stays approved.
+- Host or domain changes require explicit approval before any credential is sent.
+- Pending approvals store metadata such as profile, host, sample URL, timestamps, and count. They do not store raw secrets.
+
 ## Web UI
 
 The dashboard requires the master key before reading metadata or mutating vault state. The key is kept in browser session storage for the current browser session.

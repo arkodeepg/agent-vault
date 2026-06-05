@@ -28,6 +28,8 @@ http://127.0.0.1:8787
 - Update names, comments, tags, and values.
 - Archive and restore items.
 - Add and run stored commands.
+- View API profiles and approved hosts.
+- Approve or reject pending domain requests.
 - View activity metadata.
 - Export active items as CSV after entering the master key. CSV output uses proper quoting for commas, quotes, and newlines.
 - Copy agent documentation with the Copy agent docs button.
@@ -37,6 +39,7 @@ http://127.0.0.1:8787
 - Compose binds to `127.0.0.1:8787`, not the LAN.
 - Metadata and mutation APIs require the dashboard unlock key.
 - The web UI does not expose raw reveal, delete, purge, rollback, or restore-backup.
+- Domain approval only updates API profile host allowlists. It does not reveal secret values.
 - CSV export is master-key gated and refuses to run in agent mode.
 - Request bodies are not logged by default.
 - Browser responses use `Cache-Control: no-store`.

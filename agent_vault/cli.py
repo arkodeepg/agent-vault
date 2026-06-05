@@ -28,6 +28,9 @@ Usage:
   s api ls
   s api add PROFILE --from FILE [--comment TEXT] [--tags a,b]
   s api request PROFILE --method METHOD --url URL [--header K=V] [--body TEXT|@FILE]
+  s api pending [--all]
+  s api approve REQUEST_ID
+  s api reject REQUEST_ID
   s history NAME
   s status
   s doctor
@@ -53,7 +56,7 @@ COMMAND_HELP = {
     "update": "s update NAME [--stdin] [--comment TEXT] [--name NEW_NAME] [--tags a,b]\nUpdates value or safe metadata.",
     "run": "s run NAME [NAME...] -- command [args...]\nHuman/manual raw injection path. Refuses in agent mode.",
     "cmd": "s cmd ls | s cmd add NAME --uses KEY -- command | s cmd update NAME | s cmd run NAME\nStores command templates. Secret-backed runs refuse in agent mode.",
-    "api": "s api ls | s api add PROFILE --from FILE | s api request PROFILE --method GET --url URL\nRuns API requests while keeping raw credentials inside Agent Vault.",
+    "api": "s api ls | s api add PROFILE --from FILE | s api request PROFILE --method GET --url URL | s api pending | s api approve REQUEST_ID\nRuns API requests while keeping raw credentials inside Agent Vault.",
     "history": "s history NAME\nLists value history metadata only. Never prints previous values.",
     "version": "s version\nPrints the Agent Vault app version.",
     "backup": "s backup [--to DIR]\nCreates an encrypted backup without decrypting secret values.",
@@ -289,6 +292,22 @@ def main(argv: list[str] | None = None) -> int:
                     body=read_body(ns.body),
                 )
                 print(json.dumps(result, indent=2))
+                return 0
+            if sub == "pending":
+                rows = core.pending_host_rows(include_all="--all" in argv[2:])
+                print(json.dumps(rows, indent=2))
+                return 0
+            if sub == "approve":
+                if len(argv) < 3:
+                    raise core.VaultError("usage: s api approve REQUEST_ID")
+                row = core.approve_pending_host(argv[2])
+                print(json.dumps(row, indent=2))
+                return 0
+            if sub == "reject":
+                if len(argv) < 3:
+                    raise core.VaultError("usage: s api reject REQUEST_ID")
+                row = core.reject_pending_host(argv[2])
+                print(json.dumps(row, indent=2))
                 return 0
             raise core.VaultError(f"unknown api subcommand: {sub}")
 

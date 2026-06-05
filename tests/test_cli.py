@@ -182,6 +182,72 @@ def test_agent_api_request_uses_key_without_exposing_it(tmp_path):
         thread.join(timeout=5)
 
 
+def test_api_pending_host_approval_flow(tmp_path):
+    assert run_s(tmp_path, "init").returncode == 0
+    assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeAPI)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({
+        "auth_type": "bearer_header",
+        "credential_names": ["TEST_API_KEY"],
+        "allowed_hosts": ["127.0.0.1"],
+    }))
+    try:
+        assert run_s(tmp_path, "api", "add", "TEST_PROFILE", "--from", str(profile)).returncode == 0
+        proc = run_s(
+            tmp_path,
+            "api",
+            "request",
+            "TEST_PROFILE",
+            "--method",
+            "GET",
+            "--url",
+            f"http://localhost:{port}/test",
+            extra_env={"S_AGENT_MODE": "1"},
+        )
+        assert proc.returncode == 1
+        assert "host localhost is not allowed" in proc.stderr
+        assert FAKE not in proc.stderr
+
+        proc = run_s(tmp_path, "api", "pending")
+        assert proc.returncode == 0, proc.stderr
+        pending = json.loads(proc.stdout)
+        assert len(pending) == 1
+        assert pending[0]["profile"] == "TEST_PROFILE"
+        assert pending[0]["host"] == "localhost"
+        assert pending[0]["count"] == 1
+        assert FAKE not in proc.stdout
+
+        proc = run_s(tmp_path, "api", "approve", pending[0]["id"])
+        assert proc.returncode == 0, proc.stderr
+        approved = json.loads(proc.stdout)
+        assert approved["status"] == "approved"
+
+        proc = run_s(
+            tmp_path,
+            "api",
+            "request",
+            "TEST_PROFILE",
+            "--method",
+            "GET",
+            "--url",
+            f"http://localhost:{port}/test",
+            extra_env={"S_AGENT_MODE": "1"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        result = json.loads(proc.stdout)
+        assert result["status"] == 200
+        assert result["body"]["ok"] is True
+        assert FakeAPI.seen_auth == f"Bearer {FAKE}"
+        assert FAKE not in proc.stdout
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
 def test_backup_does_not_decrypt_secret(tmp_path):
     assert run_s(tmp_path, "init").returncode == 0
     assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0
