@@ -1,53 +1,105 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="420" viewBox="0 0 1120 420" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="800" viewBox="0 0 1440 800" role="img" aria-labelledby="title desc">
   <title id="title">Agent Vault domain approval flow</title>
-  <desc id="desc">A request to a new host is blocked, stored as pending, reviewed by the user, then approved or rejected.</desc>
+  <desc id="desc">A request to a new host is blocked before auth injection, shown as a pending approval, then approved or rejected by the user.</desc>
   <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111f"/>
+      <stop offset="0.6" stop-color="#101827"/>
+      <stop offset="1" stop-color="#07131d"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d2939"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b2330"/>
+      <stop offset="1" stop-color="#23121a"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#30245f"/>
+      <stop offset="1" stop-color="#151827"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#123f32"/>
+      <stop offset="1" stop-color="#0b211a"/>
+    </linearGradient>
+    <pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse">
+      <path d="M 42 0 L 0 0 0 42" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-25%" width="140%" height="155%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000000" flood-opacity="0.34"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa8bd"/>
     </marker>
     <style>
-      .bg{fill:#0f172a}
-      .card{fill:#111827;stroke:#334155;stroke-width:2}
-      .warn{fill:#3f1d1d;stroke:#ef4444;stroke-width:2}
-      .queue{fill:#312e81;stroke:#818cf8;stroke-width:2}
-      .decision{fill:#172554;stroke:#3b82f6;stroke-width:2}
-      .approve{fill:#052e16;stroke:#22c55e;stroke-width:2}
-      .reject{fill:#3f1d1d;stroke:#f97316;stroke-width:2}
-      .text{font:600 21px system-ui,-apple-system,Segoe UI,sans-serif;fill:#f8fafc}
-      .small{font:500 15px system-ui,-apple-system,Segoe UI,sans-serif;fill:#cbd5e1}
-      .label{font:600 14px system-ui,-apple-system,Segoe UI,sans-serif;fill:#93c5fd}
-      .line{stroke:#6b7280;stroke-width:3;fill:none;marker-end:url(#arrow)}
+      .title{font:700 34px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;fill:#f8fafc}
+      .subtitle{font:500 17px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;fill:#a9b7ca}
+      .eyebrow{font:700 12px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;fill:#9fb3d9;text-transform:uppercase}
+      .heading{font:700 24px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;fill:#f8fafc}
+      .copy{font:500 16px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;fill:#cbd5e1}
+      .label{font:700 13px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;fill:#dbeafe}
+      .line{stroke:#9aa8bd;stroke-width:3.1;fill:none;marker-end:url(#arrow)}
     </style>
   </defs>
-  <rect class="bg" width="1120" height="420" rx="20"/>
 
-  <rect class="card" x="42" y="132" width="185" height="96" rx="12"/>
-  <text class="text" x="135" y="172" text-anchor="middle">New Host</text>
-  <text class="small" x="135" y="199" text-anchor="middle">api.example.com</text>
+  <rect width="1440" height="800" rx="34" fill="url(#canvas)"/>
+  <rect width="1440" height="800" rx="34" fill="url(#grid)"/>
+  <circle cx="1180" cy="150" r="250" fill="#4f46e5" opacity="0.12" filter="url(#soft)"/>
+  <circle cx="250" cy="770" r="260" fill="#14b8a6" opacity="0.10" filter="url(#soft)"/>
 
-  <rect class="warn" x="295" y="132" width="210" height="96" rx="12"/>
-  <text class="text" x="400" y="172" text-anchor="middle">Blocked</text>
-  <text class="small" x="400" y="199" text-anchor="middle">before auth injection</text>
+  <text class="eyebrow" x="72" y="76">Domain governance</text>
+  <text class="title" x="72" y="120">New hosts require explicit approval</text>
+  <text class="subtitle" x="72" y="154">Agent Vault blocks unknown domains before auth injection, then waits for a user decision.</text>
 
-  <rect class="queue" x="575" y="132" width="215" height="96" rx="12"/>
-  <text class="text" x="682" y="172" text-anchor="middle">Pending</text>
-  <text class="small" x="682" y="199" text-anchor="middle">profile, host, sample URL</text>
+  <g filter="url(#shadow)">
+    <rect x="72" y="250" width="240" height="156" rx="22" fill="url(#panel)" stroke="#314157" stroke-width="1.3"/>
+    <text class="eyebrow" x="104" y="305">Incoming request</text>
+    <text class="heading" x="104" y="344">New host</text>
+    <text class="copy" x="104" y="374">api.example.com</text>
+  </g>
 
-  <path class="decision" d="M 900 88 L 1032 180 L 900 272 L 768 180 Z"/>
-  <text class="text" x="900" y="173" text-anchor="middle">User</text>
-  <text class="text" x="900" y="200" text-anchor="middle">decision</text>
+  <g filter="url(#shadow)">
+    <rect x="390" y="250" width="250" height="156" rx="22" fill="url(#red)" stroke="#fb7185" stroke-width="1.3"/>
+    <text class="eyebrow" x="422" y="305">Protection</text>
+    <text class="heading" x="422" y="344">Blocked</text>
+    <text class="copy" x="422" y="374">before credential injection</text>
+  </g>
 
-  <rect class="approve" x="650" y="314" width="240" height="56" rx="10"/>
-  <text class="small" x="770" y="348" text-anchor="middle">approve: add host to allowlist</text>
+  <g filter="url(#shadow)">
+    <rect x="718" y="250" width="268" height="156" rx="22" fill="url(#purple)" stroke="#8b8cf6" stroke-width="1.3"/>
+    <text class="eyebrow" x="750" y="305">Approval queue</text>
+    <text class="heading" x="750" y="344">Pending review</text>
+    <text class="copy" x="750" y="374">profile, host, sample URL</text>
+  </g>
 
-  <rect class="reject" x="930" y="314" width="210" height="56" rx="10"/>
-  <text class="small" x="1035" y="348" text-anchor="middle">reject: keep blocked</text>
+  <g filter="url(#shadow)">
+    <path d="M1180 214 L1338 328 L1180 442 L1022 328 Z" fill="#162b4a" stroke="#60a5fa" stroke-width="1.4"/>
+    <text class="eyebrow" x="1180" y="304" text-anchor="middle">User control</text>
+    <text class="heading" x="1180" y="338" text-anchor="middle">Approve?</text>
+    <text class="copy" x="1180" y="368" text-anchor="middle">one-time decision</text>
+  </g>
 
-  <path class="line" d="M 227 180 L 295 180"/>
-  <path class="line" d="M 505 180 L 575 180"/>
-  <path class="line" d="M 790 180 L 768 180"/>
-  <path class="line" d="M 870 248 L 780 314"/>
-  <text class="label" x="808" y="287">approve</text>
-  <path class="line" d="M 945 250 L 1035 314"/>
-  <text class="label" x="1015" y="287">reject</text>
+  <g filter="url(#shadow)">
+    <rect x="742" y="570" width="310" height="88" rx="18" fill="url(#green)" stroke="#34d399" stroke-width="1.3"/>
+    <text class="heading" x="774" y="614">Approve</text>
+    <text class="copy" x="774" y="642">host added to profile allowlist</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1106" y="570" width="270" height="88" rx="18" fill="url(#red)" stroke="#fb923c" stroke-width="1.3"/>
+    <text class="heading" x="1138" y="614">Reject</text>
+    <text class="copy" x="1138" y="642">profile remains unchanged</text>
+  </g>
+
+  <path class="line" d="M312 328 L390 328"/>
+  <path class="line" d="M640 328 L718 328"/>
+  <path class="line" d="M986 328 L1022 328"/>
+  <path class="line" d="M1143 419 C1108 492 1012 535 930 570"/>
+  <text class="label" x="1010" y="525" text-anchor="middle">approve</text>
+  <path class="line" d="M1216 420 C1248 492 1244 532 1242 570"/>
+  <text class="label" x="1276" y="525" text-anchor="middle">reject</text>
 </svg>
