@@ -27,13 +27,7 @@ Default master key: `password`. Change it in the `Master key` tab.
 
 ## Domain Approval
 
-```mermaid
-flowchart LR
-    A[Pending host appears] --> B[Review profile and sample URL]
-    B --> C{Decision}
-    C -->|Approve| D[Host added to allowlist]
-    C -->|Reject| E[Request remains blocked]
-```
+![Dashboard pending domain approval](assets/dashboard-domain-approval.svg)
 
 Approving a domain updates the API profile allowlist. It does not reveal secret values.
 

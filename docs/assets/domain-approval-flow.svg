@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="420" viewBox="0 0 1120 420" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Vault domain approval flow</title>
+  <desc id="desc">A request to a new host is blocked, stored as pending, reviewed by the user, then approved or rejected.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    </marker>
+    <style>
+      .bg{fill:#0f172a}
+      .card{fill:#111827;stroke:#334155;stroke-width:2}
+      .warn{fill:#3f1d1d;stroke:#ef4444;stroke-width:2}
+      .queue{fill:#312e81;stroke:#818cf8;stroke-width:2}
+      .decision{fill:#172554;stroke:#3b82f6;stroke-width:2}
+      .approve{fill:#052e16;stroke:#22c55e;stroke-width:2}
+      .reject{fill:#3f1d1d;stroke:#f97316;stroke-width:2}
+      .text{font:600 21px system-ui,-apple-system,Segoe UI,sans-serif;fill:#f8fafc}
+      .small{font:500 15px system-ui,-apple-system,Segoe UI,sans-serif;fill:#cbd5e1}
+      .label{font:600 14px system-ui,-apple-system,Segoe UI,sans-serif;fill:#93c5fd}
+      .line{stroke:#6b7280;stroke-width:3;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect class="bg" width="1120" height="420" rx="20"/>
+
+  <rect class="card" x="42" y="132" width="185" height="96" rx="12"/>
+  <text class="text" x="135" y="172" text-anchor="middle">New Host</text>
+  <text class="small" x="135" y="199" text-anchor="middle">api.example.com</text>
+
+  <rect class="warn" x="295" y="132" width="210" height="96" rx="12"/>
+  <text class="text" x="400" y="172" text-anchor="middle">Blocked</text>
+  <text class="small" x="400" y="199" text-anchor="middle">before auth injection</text>
+
+  <rect class="queue" x="575" y="132" width="215" height="96" rx="12"/>
+  <text class="text" x="682" y="172" text-anchor="middle">Pending</text>
+  <text class="small" x="682" y="199" text-anchor="middle">profile, host, sample URL</text>
+
+  <path class="decision" d="M 900 88 L 1032 180 L 900 272 L 768 180 Z"/>
+  <text class="text" x="900" y="173" text-anchor="middle">User</text>
+  <text class="text" x="900" y="200" text-anchor="middle">decision</text>
+
+  <rect class="approve" x="650" y="314" width="240" height="56" rx="10"/>
+  <text class="small" x="770" y="348" text-anchor="middle">approve: add host to allowlist</text>
+
+  <rect class="reject" x="930" y="314" width="210" height="56" rx="10"/>
+  <text class="small" x="1035" y="348" text-anchor="middle">reject: keep blocked</text>
+
+  <path class="line" d="M 227 180 L 295 180"/>
+  <path class="line" d="M 505 180 L 575 180"/>
+  <path class="line" d="M 790 180 L 768 180"/>
+  <path class="line" d="M 870 248 L 780 314"/>
+  <text class="label" x="808" y="287">approve</text>
+  <path class="line" d="M 945 250 L 1035 314"/>
+  <text class="label" x="1015" y="287">reject</text>
+</svg>

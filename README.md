@@ -12,28 +12,11 @@ Agents see safe metadata and API responses. Agent Vault keeps the credentials, v
 
 ## How It Works
 
-```mermaid
-flowchart LR
-    A[Agent or script] -->|profile, method, URL, body| B[Agent Vault]
-    B --> C{Host approved?}
-    C -->|No| D[Create pending domain request]
-    C -->|Yes| E[Inject credential inside vault]
-    E --> F[External API]
-    F -->|response| B
-    B -->|API result, no raw key| A
-```
+![Agent Vault API broker flow](docs/assets/api-broker-flow.svg)
 
 ## Domain Approval
 
-```mermaid
-flowchart TD
-    A[Script requests new host] --> B[Agent Vault blocks request]
-    B --> C[Pending approval appears in dashboard]
-    C --> D{User decision}
-    D -->|Approve| E[Host added to profile allowlist]
-    D -->|Reject| F[Profile unchanged]
-    E --> G[Future requests to that host can run]
-```
+![Agent Vault domain approval flow](docs/assets/domain-approval-flow.svg)
 
 Path changes on an already approved host can be handled by scripts. Host changes need approval once.
 

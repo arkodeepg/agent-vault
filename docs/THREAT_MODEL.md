@@ -8,13 +8,7 @@ Agents must be able to use API-backed capabilities without receiving raw API key
 
 Agent Vault is a proxy and broker:
 
-```mermaid
-flowchart LR
-    A[Agent] -->|API request intent| B[Agent Vault]
-    B -->|injects auth internally| C[External API]
-    C -->|response| B
-    B -->|response only| A
-```
+![Agent Vault API broker flow](assets/api-broker-flow.svg)
 
 The agent receives the result, not the key.
 

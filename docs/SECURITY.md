@@ -26,33 +26,13 @@ Blocked in agent mode:
 
 ## API Broker
 
-```mermaid
-sequenceDiagram
-    participant Agent
-    participant Vault as Agent Vault
-    participant API as External API
-
-    Agent->>Vault: profile, method, URL, headers, body
-    Vault->>Vault: validate profile and host
-    Vault->>Vault: inject credential internally
-    Vault->>API: authenticated request
-    API-->>Vault: response
-    Vault-->>Agent: response without raw credential
-```
+![Agent Vault API broker flow](assets/api-broker-flow.svg)
 
 The agent never receives the API key. It only receives the API response.
 
 ## Domain Approval
 
-```mermaid
-flowchart TD
-    A[Request to new host] --> B[Block before auth injection]
-    B --> C[Store pending approval]
-    C --> D[Dashboard API Profiles tab]
-    D --> E{User decision}
-    E -->|Approve| F[Add host to profile allowlist]
-    E -->|Reject| G[Leave profile unchanged]
-```
+![Agent Vault domain approval flow](assets/domain-approval-flow.svg)
 
 Rules:
 
