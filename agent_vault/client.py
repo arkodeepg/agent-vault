@@ -21,9 +21,9 @@ def api_request(
 ) -> dict[str, Any]:
     """Call Agent Vault's agent API request endpoint without exposing raw keys."""
     base = (vault_url or os.environ.get("AGENT_VAULT_URL") or "http://100.97.39.56:8787").rstrip("/")
-    agent_token = token or os.environ.get("AGENT_VAULT_TOKEN")
+    agent_token = token or os.environ.get("AGENT_VAULT_TOKEN") or os.environ.get("S_AGENT_API_TOKEN")
     if not agent_token:
-        raise AgentVaultClientError("AGENT_VAULT_TOKEN is required")
+        raise AgentVaultClientError("AGENT_VAULT_TOKEN or S_AGENT_API_TOKEN is required")
     payload = {
         "profile": profile,
         "method": method,

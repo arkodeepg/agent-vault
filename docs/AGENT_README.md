@@ -59,6 +59,8 @@ response = api_request(
 )
 ```
 
+For HTTP client usage, set `AGENT_VAULT_URL` plus either `AGENT_VAULT_TOKEN` or `S_AGENT_API_TOKEN`.
+
 ## Pending Domains
 
 If the URL host is not approved, Agent Vault blocks the request and creates a pending approval.

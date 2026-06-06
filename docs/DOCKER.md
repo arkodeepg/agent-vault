@@ -63,6 +63,8 @@ x-agent-vault-token
 
 This token allows brokered API requests only. It does not reveal raw credentials.
 
+Python clients accept either `AGENT_VAULT_TOKEN` or `S_AGENT_API_TOKEN` from the environment.
+
 ## Legacy Migration
 
 Old Docker installs that used `/data/master.key` can migrate once:
