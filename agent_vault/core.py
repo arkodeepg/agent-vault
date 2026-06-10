@@ -701,6 +701,15 @@ def validate_api_profile(profile: dict[str, Any]) -> None:
     for host in hosts:
         if not isinstance(host, str) or not host or "/" in host:
             raise VaultError("API profile allowed_hosts must be bare hostnames")
+    http_origins = profile.get("allowed_http_origins", [])
+    if not isinstance(http_origins, list):
+        raise VaultError("API profile allowed_http_origins must be a list")
+    for origin in http_origins:
+        if not isinstance(origin, str):
+            raise VaultError("API profile allowed_http_origins must contain strings")
+        parsed = urlparse(origin)
+        if parsed.scheme != "http" or not parsed.hostname or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+            raise VaultError("API profile allowed_http_origins must be bare http origins")
     credential_names = profile.get("credential_names", [])
     if not isinstance(credential_names, list):
         raise VaultError("API profile credential_names must be a list")
@@ -710,6 +719,8 @@ def validate_api_profile(profile: dict[str, Any]) -> None:
         raise VaultError(f"{auth_type} requires credential_names")
     if auth_type == "custom_header" and not profile.get("header_name"):
         raise VaultError("custom_header requires header_name")
+    if "header_value_prefix" in profile and not isinstance(profile["header_value_prefix"], str):
+        raise VaultError("header_value_prefix must be a string")
     if auth_type == "query_param" and not profile.get("param_name"):
         raise VaultError("query_param requires param_name")
     if auth_type == "basic_auth" and len(credential_names) != 2:
@@ -731,6 +742,7 @@ def api_profile_public(row: dict[str, Any]) -> dict[str, Any]:
             profile = load_api_profile(row["name"])
             out["auth_type"] = profile.get("auth_type", "")
             out["allowed_hosts"] = profile.get("allowed_hosts", [])
+            out["allowed_http_origins"] = profile.get("allowed_http_origins", [])
         except VaultError:
             out["profile_error"] = "profile metadata unavailable"
     return out
@@ -750,15 +762,28 @@ def normalize_headers(headers: dict[str, str] | None) -> dict[str, str]:
     return out
 
 
+def url_origin(parsed: Any) -> str:
+    host = (parsed.hostname or "").lower()
+    if parsed.port is None:
+        return f"{parsed.scheme}://{host}"
+    return f"{parsed.scheme}://{host}:{parsed.port}"
+
+
+def is_loopback_http(parsed: Any) -> bool:
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "http" and host in {"127.0.0.1", "localhost", "::1"}
+
+
 def ensure_allowed_url(profile: dict[str, Any], url: str) -> None:
     parsed = urlparse(url)
-    host = parsed.hostname or ""
-    if parsed.scheme != "https":
-        if not (parsed.scheme == "http" and host in {"127.0.0.1", "localhost"}):
-            raise VaultError("API requests must use https URLs except loopback HTTP")
-    allowed = set(profile.get("allowed_hosts", []))
+    host = (parsed.hostname or "").lower()
+    allowed = {str(item).lower() for item in profile.get("allowed_hosts", [])}
     if host not in allowed:
         raise VaultError(f"host {host} is not allowed for this API profile")
+    if parsed.scheme != "https":
+        allowed_http_origins = {str(item).rstrip("/").lower() for item in profile.get("allowed_http_origins", [])}
+        if not (is_loopback_http(parsed) or url_origin(parsed) in allowed_http_origins):
+            raise VaultError("API requests must use https URLs except loopback or approved internal HTTP origins")
 
 
 def pending_host_id(profile: str, host: str) -> str:
@@ -855,7 +880,7 @@ def inject_api_auth(profile: dict[str, Any], url: str, headers: dict[str, str]) 
         headers[profile.get("header_name", "Authorization")] = f"Bearer {values[names[0]]}"
         return url, headers, secrets
     if auth_type == "custom_header":
-        headers[str(profile["header_name"])] = values[names[0]]
+        headers[str(profile["header_name"])] = f"{profile.get('header_value_prefix', '')}{values[names[0]]}"
         return url, headers, secrets
     if auth_type == "query_param":
         parsed = urlparse(url)

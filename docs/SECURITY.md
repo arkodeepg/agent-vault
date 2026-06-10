@@ -36,6 +36,7 @@ Rules:
 
 - Same host, new path: allowed if the profile already approves the host.
 - New host: blocked until approved.
+- Non-loopback HTTP: blocked unless the profile approves the exact internal origin through `allowed_http_origins`.
 - Pending records store profile, host, sample URL, count, and timestamps.
 - Pending records do not store raw secrets.
 

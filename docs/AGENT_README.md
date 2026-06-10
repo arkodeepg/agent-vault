@@ -47,6 +47,8 @@ S_AGENT_MODE=1 s api request PROFILE \
 
 Agent Vault checks the API profile, verifies the host, injects credentials internally, sends the request, and returns the response.
 
+Most APIs should use HTTPS. Internal home-server HTTP APIs work only when the profile has the exact origin in `allowed_http_origins`, such as `http://100.97.39.56:8090`. Do not assume every port on the same host is approved.
+
 Python scripts should use the client library:
 
 ```python
@@ -64,6 +66,8 @@ For HTTP client usage, set `AGENT_VAULT_URL` plus either `AGENT_VAULT_TOKEN` or 
 ## Pending Domains
 
 If the URL host is not approved, Agent Vault blocks the request and creates a pending approval.
+
+For non-loopback HTTP, host approval is not enough. The profile must include the exact internal HTTP origin.
 
 ```bash
 S_AGENT_MODE=1 s api pending

@@ -182,6 +182,54 @@ def test_agent_api_request_uses_key_without_exposing_it(tmp_path):
         thread.join(timeout=5)
 
 
+def test_internal_http_origins_are_exact(tmp_path):
+    profile = {
+        "auth_type": "bearer_header",
+        "credential_names": ["TEST_API_KEY"],
+        "allowed_hosts": ["100.97.39.56"],
+        "allowed_http_origins": ["http://100.97.39.56:8000"],
+    }
+    core.validate_api_profile(profile)
+    core.ensure_allowed_url(profile, "http://100.97.39.56:8000/api/documents/")
+    try:
+        core.ensure_allowed_url(profile, "http://100.97.39.56:3014/api/containers")
+        raise AssertionError("different internal HTTP port was allowed")
+    except core.VaultError as exc:
+        assert "approved internal HTTP origins" in str(exc)
+
+
+def test_custom_header_value_prefix(tmp_path, monkeypatch):
+    monkeypatch.setenv("S_KEY", "test-password")
+    monkeypatch.setenv("S_VAULT_PATH", str(tmp_path / "vault.senv"))
+    core.init_vault()
+    core.add_item("TEST_API_KEY", "test_token_value")
+    profile = {
+        "auth_type": "custom_header",
+        "header_name": "Authorization",
+        "header_value_prefix": "Token ",
+        "credential_names": ["TEST_API_KEY"],
+        "allowed_hosts": ["127.0.0.1"],
+    }
+    url, headers, secrets = core.inject_api_auth(profile, "https://127.0.0.1/test", {})
+    assert url == "https://127.0.0.1/test"
+    assert headers["Authorization"] == "Token test_token_value"
+    assert secrets == ["test_token_value"]
+
+
+def test_invalid_internal_http_origin_profile_fails(tmp_path):
+    profile = {
+        "auth_type": "bearer_header",
+        "credential_names": ["TEST_API_KEY"],
+        "allowed_hosts": ["100.97.39.56"],
+        "allowed_http_origins": ["http://100.97.39.56:8000/api"],
+    }
+    try:
+        core.validate_api_profile(profile)
+        raise AssertionError("invalid origin profile was accepted")
+    except core.VaultError as exc:
+        assert "bare http origins" in str(exc)
+
+
 def test_api_pending_host_approval_flow(tmp_path):
     assert run_s(tmp_path, "init").returncode == 0
     assert run_s(tmp_path, "add", "TEST_API_KEY", "--stdin", input_text=FAKE).returncode == 0

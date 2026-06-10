@@ -18,6 +18,7 @@ The agent receives the result, not the key.
 - subprocesses reading secrets from environment variables
 - agents using reveal, export, backup, or raw run paths
 - accidental auth sent to an unapproved host
+- accidental auth sent to a different internal HTTP port on the same host
 
 ## Does Not Protect Against
 

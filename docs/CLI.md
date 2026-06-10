@@ -52,6 +52,24 @@ s api add PROFILE --from profile.json
 s api request PROFILE --method GET --url https://api.example.com/path
 ```
 
+Profile shape:
+
+```json
+{
+  "auth_type": "bearer_header",
+  "credential_names": ["PAPERLESS_API_TOKEN"],
+  "allowed_hosts": ["100.97.39.56", "arkohomeserver.tail5a1276.ts.net"],
+  "allowed_http_origins": [
+    "http://100.97.39.56:8000",
+    "http://arkohomeserver.tail5a1276.ts.net:8000"
+  ]
+}
+```
+
+For APIs like Paperless that need `Authorization: Token <value>`, use `auth_type: "custom_header"`, `header_name: "Authorization"`, and `header_value_prefix: "Token "`.
+
+Use `allowed_http_origins` only for exact internal HTTP services. HTTPS hosts still use `allowed_hosts`.
+
 Domain approvals:
 
 ```bash

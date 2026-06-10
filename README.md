@@ -63,6 +63,8 @@ S_AGENT_MODE=1 s api request BASECAMP \
   --url https://3.basecampapi.com/example.json
 ```
 
+API profiles use `allowed_hosts` for destination host approval. Non-loopback HTTP is blocked unless the profile also lists the exact internal origin in `allowed_http_origins`, for example `http://100.97.39.56:8000`.
+
 Pending domains:
 
 ```bash
